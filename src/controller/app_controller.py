@@ -20,6 +20,7 @@ class ApplicationController(QObject):
         self.processor = GeometrySegmentationProcessor()
         self.primitives = []
         self.modified_shapes = {}
+        self.preview_shapes = {}  # 存储预览形状
 
         # 设置回调
         self.processor.set_status_callback(self.main_window.set_status)
@@ -29,6 +30,7 @@ class ApplicationController(QObject):
         self.main_window.open_file_requested.connect(self.open_file)
         self.main_window.save_file_requested.connect(self.save_file)
         self.main_window.modify_primitive_requested.connect(self.modify_primitive)
+        self.main_window.update_preview_requested.connect(self.update_preview)  # 连接预览信号
         self.main_window.undo_requested.connect(self.undo_modification)
         self.main_window.redo_requested.connect(self.redo_modification)
 
@@ -43,6 +45,7 @@ class ApplicationController(QObject):
             # 处理几何体分割
             self.primitives = self.processor.process_shape(shape)
             self.modified_shapes = {}
+            self.preview_shapes = {}  # 清除预览缓存
 
             # 更新UI
             self.main_window.set_primitives(self.primitives)
@@ -75,21 +78,89 @@ class ApplicationController(QObject):
             primitive = self.primitives[index]
 
             try:
+                # 添加调试输出
+                print(f"修改几何体 {index}，参数：{parameters}")
+                # 提取预览标志
+                show_preview = parameters.pop("show_preview", True) if isinstance(parameters, dict) else True
+                print(f"预览状态: {show_preview}")
+
+                # 检查参数是否有实际变化
+                has_changes = primitive.has_significant_changes(primitive.get_params(), parameters)
+
+                if not has_changes:
+                    self.main_window.show_info("无变化", "参数没有实质性变化，无需更新")
+                    return
+
                 # 尝试重建几何体
                 new_shape = primitive.rebuild_with_parameters(parameters)
 
+                # 创建预览形状（如果支持）
+                preview_shape = None
+                if show_preview and hasattr(primitive, "create_preview_shape"):
+                    try:
+                        preview_shape = primitive.create_preview_shape(parameters)
+                        # 保存预览形状
+                        if preview_shape:
+                            self.preview_shapes[index] = preview_shape
+                    except Exception as e:
+                        print(f"创建预览形状失败: {str(e)}")
+
                 # 保存到历史记录
-                primitive.save_parameters_to_history(parameters)
+                if hasattr(primitive, "save_parameters_to_history"):
+                    primitive.save_parameters_to_history(parameters)
 
                 # 更新修改的形状
                 self.modified_shapes[index] = new_shape
 
                 # 更新UI
-                self.main_window.update_primitive(index, new_shape)
+                if show_preview and preview_shape:
+                    # 显示原始形状和预览
+                    self.main_window.show_original_with_preview(index, new_shape, preview_shape)
+                else:
+                    # 只显示原始形状
+                    self.main_window.update_primitive(index, new_shape)
+
                 self.main_window.set_status(f"已修改 {primitive.type} #{index + 1}")
 
             except Exception as e:
                 self.main_window.show_error("修改失败", f"参数应用失败: {str(e)}")
+
+    @Slot(int, bool)
+    def update_preview(self, index: int, show_preview: bool):
+        """更新预览显示状态"""
+        print(f"控制器收到预览更新请求：索引 {index}, 预览状态: {show_preview}")
+
+        if 0 <= index < len(self.primitives):
+            primitive = self.primitives[index]
+
+            try:
+                # 获取当前形状
+                current_shape = self.modified_shapes.get(index, primitive.original_shape)
+
+                # 获取或创建预览形状
+                preview_shape = None
+                if show_preview:
+                    print("尝试获取预览形状")
+                    # 检查是否已缓存预览形状
+                    if index in self.preview_shapes:
+                        preview_shape = self.preview_shapes[index]
+                    # 否则尝试创建新的预览形状
+                    elif hasattr(primitive, "create_preview_shape"):
+                        try:
+                            preview_shape = primitive.create_preview_shape(primitive.get_params())
+                            if preview_shape:
+                                self.preview_shapes[index] = preview_shape
+                        except Exception as e:
+                            print(f"创建预览形状失败: {str(e)}")
+
+                # 更新显示
+                if show_preview and preview_shape:
+                    self.main_window.show_original_with_preview(index, current_shape, preview_shape)
+                else:
+                    self.main_window.update_primitive(index, current_shape)
+
+            except Exception as e:
+                print(f"更新预览失败: {str(e)}")
 
     @Slot(int)
     def undo_modification(self, index: int):
@@ -104,6 +175,10 @@ class ApplicationController(QObject):
                 if new_shape:
                     # 更新修改的形状
                     self.modified_shapes[index] = new_shape
+
+                    # 清除预览形状
+                    if index in self.preview_shapes:
+                        del self.preview_shapes[index]
 
                     # 更新UI
                     self.main_window.update_primitive(index, new_shape)
@@ -125,6 +200,10 @@ class ApplicationController(QObject):
                 if new_shape:
                     # 更新修改的形状
                     self.modified_shapes[index] = new_shape
+
+                    # 清除预览形状
+                    if index in self.preview_shapes:
+                        del self.preview_shapes[index]
 
                     # 更新UI
                     self.main_window.update_primitive(index, new_shape)
