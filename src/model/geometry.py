@@ -1,448 +1,640 @@
-# src/model/geometry.py
-# 在文件顶部重新组织导入语句
+# -*- coding: utf-8 -*-
+"""
+geometry.py 兼容版 (无直接依赖 BRepBndLib 类对象)
+
+改进要点：
+1. 统一使用 _safe_add_bbox 封装执行包围盒计算，多级回退 (Add → brepbndlib_Add → 手动遍历顶点)
+2. 保留此前“真实重建 + anchor_center 锚点保持”机制
+3. 适配 OCCT / pythonocc-core 7.9.0 环境下可能缺失 BRepBndLib 符号的情况
+4. 若仅修改尺寸不改位移类参数，保持几何锚点不漂移
+"""
+
 from typing import Dict, List, Tuple, Optional, Any
 import math
 import uuid
 
-# OpenCASCADE 核心导入
-from OCC.Core.TopoDS import TopoDS_Face, TopoDS_Shape, TopoDS_Compound, topods, TopoDS_Wire, TopoDS_Edge, TopoDS_Vertex
+# ---------- OpenCASCADE 基础导入 ----------
+from OCC.Core.gp import gp_GTrsf  # 确保已在文件顶部导入
+from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_GTransform  # 确保已导入
+from OCC.Core.gp import gp_Ax2, gp_Ax3, gp_Pnt, gp_Dir
+from OCC.Core.Geom import Geom_CylindricalSurface
+from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform
+from OCC.Core.TopoDS import (
+    TopoDS_Face, TopoDS_Shape, TopoDS_Compound, topods
+)
 from OCC.Core.BRep import BRep_Builder, BRep_Tool
-from OCC.Core.gp import (gp_Pnt, gp_Dir, gp_Vec, gp_Ax1, gp_Ax2, gp_Ax3,
-                         gp_Trsf, gp_Pln, gp_Circ, gp_Cylinder, gp_Cone,
-                         gp_Sphere, gp_Torus)
-from OCC.Core.BRepBuilderAPI import (BRepBuilderAPI_Transform, BRepBuilderAPI_MakeFace,
-                                     BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeWire,
-                                     BRepBuilderAPI_MakePolygon, BRepBuilderAPI_MakeVertex)
-from OCC.Core.BRepPrimAPI import (BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakeCone,
-                                  BRepPrimAPI_MakeSphere, BRepPrimAPI_MakeBox,
-                                  BRepPrimAPI_MakeTorus, BRepPrimAPI_MakePrism)
+from OCC.Core.gp import (
+    gp_Pnt, gp_Dir, gp_Vec, gp_Ax2, gp_Trsf, gp_Pln, gp_Circ
+)
+from OCC.Core.BRepBuilderAPI import (
+    BRepBuilderAPI_Transform, BRepBuilderAPI_MakeFace,
+    BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeWire
+)
+from OCC.Core.BRepPrimAPI import (
+    BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakeCone,
+    BRepPrimAPI_MakeSphere, BRepPrimAPI_MakeBox,
+    BRepPrimAPI_MakeTorus
+)
+from OCC.Core.Bnd import Bnd_Box
 from OCC.Core.TopExp import TopExp_Explorer
-from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE, TopAbs_VERTEX
-from OCC.Core.GeomAbs import GeomAbs_Circle, GeomAbs_C2  # 添加GeomAbs_C2
-from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
-from OCC.Core.TColgp import TColgp_Array2OfPnt  # 添加TColgp_Array2OfPnt
-from OCC.Core.Geom import Geom_BezierSurface  # 添加Geom_BezierSurface
-from OCC.Core.GeomAPI import GeomAPI_PointsToBSplineSurface  # 添加GeomAPI_PointsToBSplineSurfaces
+from OCC.Core.TopAbs import TopAbs_VERTEX
 
+from OCC.Core.gp import gp_GTrsf  # 新增
+from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_GTransform  # 新增
+# ===================================================================================
+# 兼容性：包围盒添加封装
+# ===================================================================================
+
+def _safe_add_bbox(shape: TopoDS_Shape, box: Bnd_Box, use_triangulation: bool = True):
+    """
+    兼容不同 pythonocc 版本的包围盒添加：
+    优先级：Add → brepbndlib_Add → 手动顶点遍历
+    """
+    # 1) 尝试 Add
+    try:
+        from OCC.Core.BRepBndLib import Add  # 常见函数式 API
+        try:
+            Add(shape, box, use_triangulation)
+            return
+        except TypeError:
+            # 有些版本 Add(shape, box, use_triangulation, use_shape_tolerance)
+            try:
+                Add(shape, box, use_triangulation, False)
+                return
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 2) 尝试 brepbndlib_Add
+    try:
+        from OCC.Core.BRepBndLib import brepbndlib_Add
+        brepbndlib_Add(shape, box)
+        return
+    except Exception:
+        pass
+
+    # 3) 手动遍历所有顶点回退
+    xmin = ymin = zmin = 1e100
+    xmax = ymax = zmax = -1e100
+    has_vertex = False
+    exp = TopExp_Explorer(shape, TopAbs_VERTEX)
+    while exp.More():
+        v = topods.Vertex(exp.Current())
+        p = BRep_Tool.Pnt(v)
+        x, y, z = p.X(), p.Y(), p.Z()
+        xmin = min(xmin, x); ymin = min(ymin, y); zmin = min(zmin, z)
+        xmax = max(xmax, x); ymax = max(ymax, y); zmax = max(zmax, z)
+        has_vertex = True
+        exp.Next()
+
+    if has_vertex:
+        box.Update(xmin, ymin, zmin, xmax, ymax, zmax)
+
+
+# ===================================================================================
+# 基类
+# ===================================================================================
 
 class GeometricPrimitive:
-    """几何基本体的基类"""
+    """几何基本体基类（支持重建 + 锚点中心）"""
 
-    def __init__(self, type_name, faces, fitting_score=1.0):
+    def __init__(self, type_name: str, faces: List[TopoDS_Face], fitting_score: float = 1.0):
         self.type = type_name
         self.faces = faces
         self.fitting_score = fitting_score
-        self.parameter_history = []
-        self.current_history_index = 0
         self.id = str(uuid.uuid4())
-        self.original_shape = None  # 保存原始形状
 
-        # 创建原始形状的复合体以保留确切的几何形状
+        self.original_shape: Optional[TopoDS_Shape] = None
+        self.anchor_center: Optional[Tuple[float, float, float]] = None
+
+        self.parameter_history: List[Dict[str, Any]] = []
+        self.current_history_index: int = 0
+
         self._create_original_shape()
+        self._ensure_anchor_center()
 
+    # ------------------------------------------------------------------
+    # 原始形状与包围盒
+    # ------------------------------------------------------------------
     def _create_original_shape(self):
-        """创建并保存原始形状复合体"""
         try:
-            # 创建复合体
             compound = TopoDS_Compound()
             builder = BRep_Builder()
             builder.MakeCompound(compound)
-
-            # 添加所有面
-            for face in self.faces:
-                builder.Add(compound, face)
-
+            for f in self.faces:
+                builder.Add(compound, f)
             self.original_shape = compound
         except Exception as e:
-            print(f"保存原始形状失败: {str(e)}")
+            print(f"[WARN] 创建原始复合体失败: {e}")
 
-    def has_significant_changes(self, old_params, new_params, tolerance=0.001):
-        """检测参数是否有实质性变化"""
-        for key, new_value in new_params.items():
-            if key not in old_params:
-                continue
+    def _compute_faces_bbox(self) -> Optional[Bnd_Box]:
+        try:
+            box = Bnd_Box()
+            for f in self.faces:
+                _safe_add_bbox(f, box, True)
+            return box
+        except Exception as e:
+            print(f"[WARN] faces bbox 计算失败: {e}")
+            return None
 
-            old_value = old_params[key]
+    @staticmethod
+    def _compute_shape_bbox(shape: TopoDS_Shape) -> Optional[Bnd_Box]:
+        try:
+            box = Bnd_Box()
+            _safe_add_bbox(shape, box, True)
+            return box
+        except Exception as e:
+            print(f"[WARN] shape bbox 计算失败: {e}")
+            return None
 
-            # 跳过非参数化属性
-            if key in ['type', 'fitting_score', 'faces', 'id']:
-                continue
+    @staticmethod
+    def _bbox_center(bbox: Bnd_Box) -> Tuple[float, float, float]:
+        xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
+        return (0.5 * (xmin + xmax), 0.5 * (ymin + ymax), 0.5 * (zmin + zmax))
 
-            # 数值比较
-            if isinstance(new_value, (int, float)) and isinstance(old_value, (int, float)):
-                if abs(new_value - old_value) > tolerance:
-                    return True
+    def _ensure_anchor_center(self):
+        if self.anchor_center is None:
+            bb = self._compute_faces_bbox()
+            if bb:
+                self.anchor_center = self._bbox_center(bb)
 
-            # 元组比较 (向量、点等)
-            elif isinstance(new_value, tuple) and isinstance(old_value, tuple):
-                if len(new_value) == len(old_value):
-                    if all(isinstance(x, (int, float)) for x in new_value + old_value):
-                        if any(abs(new_value[i] - old_value[i]) > tolerance for i in range(len(new_value))):
-                            return True
-                else:
-                    return True
+    # ------------------------------------------------------------------
+    # 向量工具
+    # ------------------------------------------------------------------
+    @staticmethod
+    def normalize_vector(vec: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        length = math.sqrt(vec[0] ** 2 + vec[1] ** 2 + vec[2] ** 2)
+        if length < 1e-12:
+            return (0.0, 0.0, 1.0)
+        return (vec[0]/length, vec[1]/length, vec[2]/length)
 
-            # 字符串比较
-            elif isinstance(new_value, str) and isinstance(old_value, str):
-                if new_value != old_value:
-                    return True
+    @staticmethod
+    def cross_product(v1: Tuple[float, float, float], v2: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        return (
+            v1[1]*v2[2] - v1[2]*v2[1],
+            v1[2]*v2[0] - v1[0]*v2[2],
+            v1[0]*v2[1] - v1[1]*v2[0]
+        )
 
-            # 其他类型直接比较
-            elif new_value != old_value:
+    def _recenter_to_anchor(self, shape: TopoDS_Shape) -> TopoDS_Shape:
+        if not self.anchor_center:
+            return shape
+        bbox = self._compute_shape_bbox(shape)
+        if not bbox:
+            return shape
+        c = self._bbox_center(bbox)
+        dx = self.anchor_center[0] - c[0]
+        dy = self.anchor_center[1] - c[1]
+        dz = self.anchor_center[2] - c[2]
+        if abs(dx)+abs(dy)+abs(dz) < 1e-9:
+            return shape
+        trsf = gp_Trsf()
+        trsf.SetTranslation(gp_Vec(dx, dy, dz))
+        return BRepBuilderAPI_Transform(shape, trsf).Shape()
+
+    # ------------------------------------------------------------------
+    # 参数比较
+    # ------------------------------------------------------------------
+    def has_significant_changes(self, old_params: Dict, new_params: Dict, tolerance=1e-6) -> bool:
+        for k, nv in new_params.items():
+            if k not in old_params:
                 return True
-
+            ov = old_params[k]
+            if isinstance(nv, (int, float)) and isinstance(ov, (int, float)):
+                if abs(nv - ov) > tolerance:
+                    return True
+            elif isinstance(nv, tuple) and isinstance(ov, tuple) and len(nv) == len(ov):
+                if any(abs(a-b) > tolerance for a, b in zip(nv, ov)):
+                    return True
+            else:
+                if nv != ov:
+                    return True
         return False
 
+    # ------------------------------------------------------------------
+    # 参数接口
+    # ------------------------------------------------------------------
     def get_params(self) -> Dict:
-        """获取参数"""
         return {
             "type": self.type,
             "fitting_score": self.fitting_score,
             "id": self.id
         }
 
-    def create_preview_shape(self, parameters):
-        """
-        创建参数预览形状 - 根据新参数创建理想化的形状用于预览
-        与rebuild_with_parameters不同，此方法真正重建形状而不是返回原始形状
-        """
-        # 默认实现，子类应重写
+    def _apply_params(self, parameters: Dict):
+        pass
+
+    def _build_shape(self, parameters: Dict, keep_anchor: bool) -> Optional[TopoDS_Shape]:
         return None
 
-    def rebuild_with_parameters(self, parameters):
-        """
-        基于参数重建几何体
-        子类需要重写此方法
-        """
-        # 当重建失败或不支持时，返回原始形状
-        return self.original_shape
+    # ------------------------------------------------------------------
+    # 预览与重建
+    # ------------------------------------------------------------------
+    def create_preview_shape(self, parameters: Dict):
+        try:
+            return self._build_shape(parameters, keep_anchor=True)
+        except Exception as e:
+            print(f"[WARN] 预览失败({self.type}): {e}")
+            return None
 
+    def rebuild_with_parameters(self, parameters: Dict):
+        old = self.get_params()
+        if not self.has_significant_changes(old, parameters):
+            return self.original_shape
+
+        new_shape = self._build_shape(parameters, keep_anchor=True)
+        if new_shape is None:
+            print(f"[WARN] {self.type} 重建失败，使用 original_shape")
+            return self.original_shape
+
+        self._apply_params(parameters)
+
+        snap = self.get_params().copy()
+        for k, v in parameters.items():
+            snap[k] = v
+        self.parameter_history.append(snap)
+        self.current_history_index = len(self.parameter_history) - 1
+        return new_shape
+
+    # ------------------------------------------------------------------
+    # 历史
+    # ------------------------------------------------------------------
     def undo(self):
-        """撤销参数修改"""
         if self.current_history_index > 0:
             self.current_history_index -= 1
-            return self.rebuild_with_parameters(self.parameter_history[self.current_history_index])
+            params = self.parameter_history[self.current_history_index]
+            self._apply_params(params)
+            return self._build_shape(params, keep_anchor=True)
         return None
 
     def redo(self):
-        """重做参数修改"""
         if self.current_history_index < len(self.parameter_history) - 1:
             self.current_history_index += 1
-            return self.rebuild_with_parameters(self.parameter_history[self.current_history_index])
+            params = self.parameter_history[self.current_history_index]
+            self._apply_params(params)
+            return self._build_shape(params, keep_anchor=True)
         return None
 
-    @staticmethod
-    def normalize_vector(vec):
-        """归一化向量"""
-        length = math.sqrt(vec[0] ** 2 + vec[1] ** 2 + vec[2] ** 2)
-        if length < 1e-10:
-            return (0, 0, 1)  # 默认向上
-        return (vec[0] / length, vec[1] / length, vec[2] / length)
-
-    @staticmethod
-    def cross_product(v1, v2):
-        """计算叉积"""
-        return (
-            v1[1] * v2[2] - v1[2] * v2[1],
-            v1[2] * v2[0] - v1[0] * v2[2],
-            v1[0] * v2[1] - v1[1] * v2[0]
-        )
-
     def can_undo(self):
-        """检查是否可以撤销"""
         return self.current_history_index > 0
 
     def can_redo(self):
-        """检查是否可以重做"""
         return self.current_history_index < len(self.parameter_history) - 1
 
+
+# ===================================================================================
+# Plane
+# ===================================================================================
+
 class Plane(GeometricPrimitive):
-    """平面几何体"""
+    """
+    平面（中心锚点缩放版）
+    - 去掉 width/height，使用 scale_u / scale_v
+    - normal / origin 变化：刚性变换（旋转+平移）
+    - scale_u / scale_v 变化：关于形状中心（包围盒中心）沿 U/V 各向异性缩放，不再发生位置偏移
+    - 每次重建都基于 original_shape 组合变换，避免累计误差
+    """
 
-    def __init__(self, faces, normal, origin, width, height, shape_type="rectangle", fitting_score=1.0):
+    def __init__(self, faces, normal, origin,
+                 width=None, height=None,  # 兼容旧签名
+                 shape_type="generic",
+                 fitting_score=1.0):
         super().__init__("plane", faces, fitting_score)
-        self.normal = normal
+
+        self.normal = self.normalize_vector(normal)
         self.origin = origin
-        self.width = width
-        self.height = height
-        self.shape_type = shape_type  # 形状类型："rectangle" 或 "circle"
+        self.shape_type = shape_type
 
-        # 尝试检测形状类型（如果未指定）
-        if self.shape_type == "rectangle" and len(faces) > 0:
-            self._detect_shape_type()
+        self.scale_u = 1.0
+        self.scale_v = 1.0
 
-        # 初始化参数历史
-        initial_params = self.get_params()
-        self.parameter_history.append(initial_params)
-        self.current_history_index = 0
+        # 固定基准（用于从 original_shape 重建，避免累计误差）
+        self._base_normal = self.normal
+        self._base_origin = self.origin
 
-    # 为Plane类添加create_preview_shape方法
-    def create_preview_shape(self, parameters):
-        """创建平面预览形状"""
-        try:
-            # 提取新参数
-            new_normal = parameters.get("normal", self.normal)
-            new_origin = parameters.get("origin", self.origin)
-            new_width = parameters.get("width", self.width)
-            new_height = parameters.get("height", self.height)
-            new_shape_type = parameters.get("shape_type", self.shape_type)
+        # 当前参考（用于 UI 显示/比较）
+        self._current_normal = self.normal
+        self._current_origin = self.origin
+        self._current_scale_u = self.scale_u
+        self._current_scale_v = self.scale_v
 
-            # 归一化法向量
-            norm_normal = self.normalize_vector(new_normal)
+        snap = self.get_params()
+        self.parameter_history.append(snap)
 
-            # 创建点和方向
-            pnt = gp_Pnt(*new_origin)
-            direction = gp_Dir(*norm_normal)
+    # ---------------- 工具：根据 normal 构造局部 U/V ----------------
+    def _construct_local_axes(self, normal: Tuple[float, float, float]):
+        n = self.normalize_vector(normal)
+        ref = (0, 0, 1) if abs(n[2]) < 0.9 else (1, 0, 0)
+        u = (ref[1]*n[2] - ref[2]*n[1],
+             ref[2]*n[0] - ref[0]*n[2],
+             ref[0]*n[1] - ref[1]*n[0])
+        ul = math.sqrt(u[0]**2 + u[1]**2 + u[2]**2) or 1.0
+        u = (u[0]/ul, u[1]/ul, u[2]/ul)
+        v = (n[1]*u[2] - n[2]*u[1],
+             n[2]*u[0] - n[0]*u[2],
+             n[0]*u[1] - n[1]*u[0])
+        return u, v
 
-            # 根据形状类型创建不同的预览形状
-            if new_shape_type == "circle":
-                # 创建圆形面
-                # 创建坐标系，Z轴为法向量
-                from OCC.Core.gp import gp_Circ, gp_Ax2
-
-                # 创建带方向的坐标系，Z轴为法向量
-                ax2 = gp_Ax2(pnt, direction)
-
-                # 创建圆
-                radius = new_width / 2
-                circle = gp_Circ(ax2, radius)
-
-                # 创建边、线框和面
-                edge = BRepBuilderAPI_MakeEdge(circle).Edge()
-                wire = BRepBuilderAPI_MakeWire(edge).Wire()
-                face = BRepBuilderAPI_MakeFace(wire).Face()
-                return face
-            else:
-                # 创建矩形面
-                plane = gp_Pln(pnt, direction)
-                face = BRepBuilderAPI_MakeFace(plane, -new_width / 2, new_width / 2,
-                                               -new_height / 2, new_height / 2).Face()
-                return face
-
-        except Exception as e:
-            print(f"创建平面预览形状失败: {str(e)}")
-            return None
-
-    def _detect_shape_type(self):
-        """自动检测平面形状类型"""
-        try:
-            from OCC.Core.TopExp import TopExp_Explorer
-            from OCC.Core.TopAbs import TopAbs_WIRE, TopAbs_EDGE
-            from OCC.Core.TopoDS import topods
-            from OCC.Core.BRepAdaptor import BRepAdaptor_Curve
-            from OCC.Core.GeomAbs import GeomAbs_Circle
-
-            # 获取第一个面的边界
-            explorer = TopExp_Explorer(self.faces[0], TopAbs_WIRE)
-            if not explorer.More():
-                return
-
-            wire = topods.Wire(explorer.Current())
-
-            # 获取线框的边
-            edges = []
-            edge_explorer = TopExp_Explorer(wire, TopAbs_EDGE)
-            while edge_explorer.More():
-                edges.append(topods.Edge(edge_explorer.Current()))
-                edge_explorer.Next()
-
-            # 检查是否是圆（通常只有一条边）
-            if len(edges) == 1:
-                curve = BRepAdaptor_Curve(edges[0])
-                if curve.GetType() == GeomAbs_Circle:
-                    self.shape_type = "circle"
-                    # 更新尺寸为圆直径
-                    self.width = self.height = curve.Circle().Radius() * 2
-        except Exception as e:
-            print(f"检测形状类型失败: {str(e)}")
-
-    def get_params(self) -> Dict:
-        params = super().get_params()
-        params.update({
+    # ---------------- 参数接口 ----------------
+    def get_params(self):
+        p = super().get_params()
+        p.update({
             "normal": self.normal,
             "origin": self.origin,
-            "width": self.width,
-            "height": self.height,
+            "scale_u": self.scale_u,
+            "scale_v": self.scale_v,
             "shape_type": self.shape_type
         })
-        return params
+        return p
 
-    def rebuild_with_parameters(self, parameters):
-        """基于新参数重建平面"""
-        # 提取新参数
-        new_normal = parameters.get("normal", self.normal)
+    def _apply_params(self, parameters: Dict):
+        self.normal = self.normalize_vector(parameters.get("normal", self.normal))
+        self.origin = parameters.get("origin", self.origin)
+        self.scale_u = parameters.get("scale_u", self.scale_u)
+        self.scale_v = parameters.get("scale_v", self.scale_v)
+        self.shape_type = parameters.get("shape_type", self.shape_type)
+
+    # ---------------- 刚性变换（旋转+平移） ----------------
+    def _rigid_trsf(self, new_origin, new_normal):
+        old_origin = self._base_origin
+        old_normal = self._base_normal
+
+        oN = self.normalize_vector(old_normal)
+        nN = self.normalize_vector(new_normal)
+
+        cross = self.cross_product(oN, nN)
+        clen = math.sqrt(sum(c*c for c in cross))
+        dot = max(-1.0, min(1.0, oN[0]*nN[0] + oN[1]*nN[1] + oN[2]*nN[2]))
+
+        trsf = gp_Trsf()
+
+        # 旋转
+        if clen < 1e-12:
+            if dot < 0:  # 反向
+                ref = (1, 0, 0) if abs(oN[0]) < 0.9 else (0, 1, 0)
+                rot_axis = self.cross_product(oN, ref)
+                rl = math.sqrt(sum(a*a for a in rot_axis)) or 1.0
+                rot_axis = (rot_axis[0]/rl, rot_axis[1]/rl, rot_axis[2]/rl)
+                ax2 = gp_Ax2(gp_Pnt(*old_origin), gp_Dir(*rot_axis))
+                trsf.SetRotation(ax2.Axis(), math.pi)
+            # dot≈1 时 trsf 为恒等
+        else:
+            angle = math.acos(dot)
+            rot_axis = (cross[0]/clen, cross[1]/clen, cross[2]/clen)
+            ax2 = gp_Ax2(gp_Pnt(*old_origin), gp_Dir(*rot_axis))
+            trsf.SetRotation(ax2.Axis(), angle)
+
+        # 旋转后的旧原点位置
+        rot_origin = gp_Pnt(*old_origin)
+        rot_origin.Transform(trsf)  # 恒等也安全
+
+        # 平移：旧原点移到新 origin
+        tx = new_origin[0] - rot_origin.X()
+        ty = new_origin[1] - rot_origin.Y()
+        tz = new_origin[2] - rot_origin.Z()
+        if abs(tx)+abs(ty)+abs(tz) > 1e-12:
+            move = gp_Trsf()
+            move.SetTranslation(gp_Vec(tx, ty, tz))
+            trsf = move * trsf
+        return trsf
+
+    # ---------------- 各向异性缩放（关于中心点） ----------------
+    def _anisotropic_scale_trsf_about_anchor(self, basis_normal, anchor_xyz, su, sv):
+        """
+        构造关于 anchor 的各向异性缩放仿射矩阵：
+        P' = A P + (anchor - A*anchor)
+        其中 A = su * U⊗U + sv * V⊗V + 1 * N⊗N
+        基 (U,V,N) 来自 basis_normal
+        """
+        g = gp_GTrsf()
+
+        # 单位缩放直接返回单位仿射（保持中心不动）
+        if abs(su - 1.0) < 1e-12 and abs(sv - 1.0) < 1e-12:
+            return g
+
+        U, V = self._construct_local_axes(basis_normal)
+        N = self.normalize_vector(basis_normal)
+
+        def outer(a, b):
+            return [
+                a[0]*b[0], a[0]*b[1], a[0]*b[2],
+                a[1]*b[0], a[1]*b[1], a[1]*b[2],
+                a[2]*b[0], a[2]*b[1], a[2]*b[2],
+            ]
+
+        ou = outer(U, U)
+        ov = outer(V, V)
+        on = outer(N, N)
+
+        A = [0.0]*9
+        for i in range(9):
+            A[i] = su*ou[i] + sv*ov[i] + on[i]
+
+        # 线性部分
+        for r in range(3):
+            for c in range(3):
+                g.SetValue(r+1, c+1, A[r*3 + c])
+
+        # 平移补偿：anchor 固定
+        Cx, Cy, Cz = anchor_xyz
+        ACx = A[0]*Cx + A[1]*Cy + A[2]*Cz
+        ACy = A[3]*Cx + A[4]*Cy + A[5]*Cz
+        ACz = A[6]*Cx + A[7]*Cy + A[8]*Cz
+        tx = Cx - ACx
+        ty = Cy - ACy
+        tz = Cz - ACz
+        g.SetValue(1, 4, tx)
+        g.SetValue(2, 4, ty)
+        g.SetValue(3, 4, tz)
+
+        return g
+
+    # ---------------- 构建形状（刚性+关于中心缩放） ----------------
+    def _build_shape(self, parameters: Dict, keep_anchor: bool):
+        new_normal = self.normalize_vector(parameters.get("normal", self.normal))
         new_origin = parameters.get("origin", self.origin)
-        new_width = parameters.get("width", self.width)
-        new_height = parameters.get("height", self.height)
-        new_shape_type = parameters.get("shape_type", self.shape_type)
+        su = parameters.get("scale_u", self.scale_u)
+        sv = parameters.get("scale_v", self.scale_v)
 
-        # 获取当前参数
-        old_params = self.get_params()
+        # 1) 刚性变换：对齐到 new_normal/new_origin
+        rigid = self._rigid_trsf(new_origin, new_normal)
+        tmp_shape = BRepBuilderAPI_Transform(self.original_shape, rigid).Shape()
 
-        # 检查是否有实质性变化
-        if not self.has_significant_changes(old_params, parameters):
-            print("平面参数无实质性变化，保持原样")
+        # 2) 计算缩放锚点：使用刚性后的形状包围盒中心
+        bbox = self._compute_shape_bbox(tmp_shape)
+        if bbox:
+            anchor = self._bbox_center(bbox)
+        else:
+            # 回退：若无法得到 bbox，就用 new_origin（不会报错，但可能不是视觉中心）
+            anchor = new_origin
+
+        # 3) 各向异性缩放（关于中心点 anchor）
+        #    若 su,sv 都为 1，直接返回刚性结果，避免数值扰动
+        if abs(su - 1.0) < 1e-12 and abs(sv - 1.0) < 1e-12:
+            return tmp_shape
+
+        gtrsf = self._anisotropic_scale_trsf_about_anchor(new_normal, anchor, su, sv)
+        scaled_shape = BRepBuilderAPI_GTransform(tmp_shape, gtrsf, True).Shape()
+        return scaled_shape
+
+    def rebuild_with_parameters(self, parameters: Dict):
+        old = self.get_params()
+        if not self.has_significant_changes(old, parameters):
             return self.original_shape
 
-        # 更新参数
-        self.normal = new_normal
-        self.origin = new_origin
-        self.width = new_width
-        self.height = new_height
-        self.shape_type = new_shape_type
+        new_shape = self._build_shape(parameters, keep_anchor=True)
+        self._apply_params(parameters)
 
-        # 添加到历史
-        new_params = self.get_params()
-        self.parameter_history.append(new_params)
+        self._current_normal = self.normal
+        self._current_origin = self.origin
+        self._current_scale_u = self.scale_u
+        self._current_scale_v = self.scale_v
+
+        snap = self.get_params().copy()
+        self.parameter_history.append(snap)
         self.current_history_index = len(self.parameter_history) - 1
+        return new_shape
 
-        # 返回原始形状以保留边界
-        return self.original_shape
+    def create_preview_shape(self, parameters: Dict):
+        try:
+            return self._build_shape(parameters, keep_anchor=True)
+        except Exception as e:
+            print(f"[WARN] 平面预览失败: {e}")
+            return None
 
-
+# ===================================================================================
+# Cylinder
+# ===================================================================================
 
 class Cylinder(GeometricPrimitive):
-    """圆柱几何体"""
+    """
+    圆柱：根据原始 faces 是否包含端盖决定重建方式
+    - 无端盖: 重建为“侧面”面片（开放圆柱），不再自动补上下盖
+    - 有端盖: 继续使用实体圆柱重建（与之前相同）
+    锚点策略与之前一致：center 为高度中点；如未显式修改 center，仅改尺寸时保持锚点位置
+    """
 
     def __init__(self, faces, axis, center, radius, height, fitting_score=1.0):
         super().__init__("cylinder", faces, fitting_score)
-        self.axis = axis
-        self.center = center
+        self.axis = self.normalize_vector(axis)
+        self.center = center        # 高度中点
         self.radius = radius
         self.height = height
 
-        # 初始化参数历史
-        initial_params = self.get_params()
-        self.parameter_history.append(initial_params)
-        self.current_history_index = 0
+        # 检测原始是否有端盖（是否包含平面面）
+        self._has_caps = self._detect_has_caps(faces)
 
-    # 为Cylinder类添加create_preview_shape方法
-    def create_preview_shape(self, parameters):
-        """创建圆柱体预览形状"""
+        init = self.get_params()
+        self.parameter_history.append(init)
+
+    def _detect_has_caps(self, faces: List[TopoDS_Face]) -> bool:
+        """粗略检测：如果一组 faces 中存在平面面，则认为原始包含端盖。"""
         try:
-            # 提取新参数
-            new_axis = parameters.get("axis", self.axis)
-            new_center = parameters.get("center", self.center)
-            new_radius = parameters.get("radius", self.radius)
-            new_height = parameters.get("height", self.height)
+            from OCC.Core.BRepAdaptor import BRepAdaptor_Surface
+            from OCC.Core.GeomAbs import GeomAbs_Plane
+            for f in faces:
+                surf = BRepAdaptor_Surface(f)
+                if surf.GetType() == GeomAbs_Plane:
+                    return True
+            return False
+        except Exception:
+            # 兜底：无法检测时，默认按“无端盖”保守处理
+            return False
 
-            # 归一化轴向量
-            norm_axis = self.normalize_vector(new_axis)
-
-            # 创建点和方向
-            center_point = gp_Pnt(*new_center)
-            axis_dir = gp_Dir(*norm_axis)
-
-            # 创建坐标系
-            ax2 = gp_Ax2(center_point, axis_dir)
-
-            # 创建圆柱体
-            cylinder = BRepPrimAPI_MakeCylinder(ax2, new_radius, new_height).Shape()
-            return cylinder
-
-        except Exception as e:
-            print(f"创建圆柱体预览形状失败: {str(e)}")
-            return None
-
-    def get_params(self) -> Dict:
-        params = super().get_params()
-        params.update({
+    def get_params(self):
+        p = super().get_params()
+        p.update({
             "axis": self.axis,
             "center": self.center,
             "radius": self.radius,
             "height": self.height
         })
-        return params
+        return p
 
-    def rebuild_with_parameters(self, parameters):
-        """基于新参数重建圆柱体"""
-        # 提取新参数
-        new_axis = parameters.get("axis", self.axis)
-        new_center = parameters.get("center", self.center)
-        new_radius = parameters.get("radius", self.radius)
-        new_height = parameters.get("height", self.height)
+    def _apply_params(self, parameters: Dict):
+        self.axis = self.normalize_vector(parameters.get("axis", self.axis))
+        self.center = parameters.get("center", self.center)
+        self.radius = parameters.get("radius", self.radius)
+        self.height = parameters.get("height", self.height)
 
-        # 获取当前参数
-        old_params = self.get_params()
+    def _build_lateral_face(self, axis: Tuple[float, float, float],
+                            center: Tuple[float, float, float],
+                            radius: float, height: float) -> TopoDS_Shape:
+        """
+        构建“仅侧面”的圆柱面（开放，无端盖）
+        使用参数面：U 为角度（0..2*pi），V 沿轴向（-h/2..h/2）
+        """
+        ax3 = gp_Ax3(gp_Pnt(*center), gp_Dir(*axis))
+        cyl_surf = Geom_CylindricalSurface(ax3, radius)
 
-        # 检查是否有实质性变化
-        if not self.has_significant_changes(old_params, parameters):
-            print("圆柱体参数无实质性变化，保持原样")
-            return self.original_shape
+        umin, umax = 0.0, 2.0 * math.pi
+        vmin, vmax = -height / 2.0, height / 2.0
 
-        # 更新参数
-        self.axis = new_axis
-        self.center = new_center
-        self.radius = new_radius
-        self.height = new_height
+        # 兼容不同绑定的重载：先尝试 5 参，再回退 6 参（含容差）
+        try:
+            face = BRepBuilderAPI_MakeFace(cyl_surf, umin, umax, vmin, vmax).Face()
+        except TypeError:
+            face = BRepBuilderAPI_MakeFace(cyl_surf, umin, umax, vmin, vmax, 1.0e-7).Face()
+        return face
 
-        # 添加到历史
-        new_params = self.get_params()
-        self.parameter_history.append(new_params)
-        self.current_history_index = len(self.parameter_history) - 1
+    def _build_solid(self, axis: Tuple[float, float, float],
+                     center: Tuple[float, float, float],
+                     radius: float, height: float) -> TopoDS_Shape:
+        """
+        构建实体圆柱（带端盖）
+        以 center 为高度中点，base_center = center - axis * (h/2)
+        """
+        base_center = (
+            center[0] - axis[0] * height / 2.0,
+            center[1] - axis[1] * height / 2.0,
+            center[2] - axis[2] * height / 2.0
+        )
+        ax2 = gp_Ax2(gp_Pnt(*base_center), gp_Dir(*axis))
+        return BRepPrimAPI_MakeCylinder(ax2, radius, height).Shape()
 
-        # 返回原始形状以保留边界
-        return self.original_shape
+    def _build_shape(self, parameters: Dict, keep_anchor: bool):
+        axis = self.normalize_vector(parameters.get("axis", self.axis))
+        center = parameters.get("center", self.center)
+        radius = parameters.get("radius", self.radius)
+        height = parameters.get("height", self.height)
+
+        if self._has_caps:
+            shape = self._build_solid(axis, center, radius, height)
+        else:
+            shape = self._build_lateral_face(axis, center, radius, height)
+
+        # 和之前一致：若未显式修改 center，仅改尺寸时保持 anchor 位置
+        if keep_anchor and "center" not in parameters:
+            shape = self._recenter_to_anchor(shape)
+        return shape
 
 
+# ===================================================================================
+# Cone
+# ===================================================================================
 
 class Cone(GeometricPrimitive):
-    """圆锥几何体"""
-
     def __init__(self, faces, axis, apex, base_center, radius, height, semi_angle=None, fitting_score=1.0):
         super().__init__("cone", faces, fitting_score)
-        self.axis = axis
+        self.axis = self.normalize_vector(axis)
         self.apex = apex
-        self.base_center = base_center
-        self.radius = radius
         self.height = height
+        self.radius = radius
+        self.base_center = base_center if base_center else (
+            apex[0] - self.axis[0]*height,
+            apex[1] - self.axis[1]*height,
+            apex[2] - self.axis[2]*height
+        )
+        self.semi_angle = semi_angle if semi_angle is not None else math.atan(radius/height)
+        init = self.get_params()
+        self.parameter_history.append(init)
 
-        # 如果未提供半角，则根据半径和高度计算
-        if semi_angle is None:
-            self.semi_angle = math.atan(radius / height)
-        else:
-            self.semi_angle = semi_angle
-
-        # 初始化参数历史
-        initial_params = self.get_params()
-        self.parameter_history.append(initial_params)
-        self.current_history_index = 0
-
-    # 为Cone类添加create_preview_shape方法
-    def create_preview_shape(self, parameters):
-        """创建圆锥体预览形状"""
-        try:
-            # 提取新参数
-            new_axis = parameters.get("axis", self.axis)
-            new_apex = parameters.get("apex", self.apex)
-            new_radius = parameters.get("radius", self.radius)
-            new_height = parameters.get("height", self.height)
-            new_semi_angle = parameters.get("semi_angle", self.semi_angle)
-
-            # 归一化轴向量
-            norm_axis = self.normalize_vector(new_axis)
-
-            # 计算底面中心（从顶点沿轴向移动高度距离）
-            base_x = new_apex[0] - norm_axis[0] * new_height
-            base_y = new_apex[1] - norm_axis[1] * new_height
-            base_z = new_apex[2] - norm_axis[2] * new_height
-            base_center = gp_Pnt(base_x, base_y, base_z)
-
-            # 创建坐标系，原点在底面中心，Z轴指向顶点
-            axis_dir = gp_Dir(-norm_axis[0], -norm_axis[1], -norm_axis[2])  # 方向取反
-            ax2 = gp_Ax2(base_center, axis_dir)
-
-            # 创建圆锥体
-            cone = BRepPrimAPI_MakeCone(ax2, new_radius, 0, new_height).Shape()
-            return cone
-
-        except Exception as e:
-            print(f"创建圆锥体预览形状失败: {str(e)}")
-            return None
-
-    def get_params(self) -> Dict:
-        params = super().get_params()
-        params.update({
+    def get_params(self):
+        p = super().get_params()
+        p.update({
             "axis": self.axis,
             "apex": self.apex,
             "base_center": self.base_center,
@@ -450,842 +642,299 @@ class Cone(GeometricPrimitive):
             "height": self.height,
             "semi_angle": self.semi_angle
         })
-        return params
+        return p
 
-    def rebuild_with_parameters(self, parameters):
-        """基于新参数重建圆锥体"""
-        # 提取新参数
-        new_axis = parameters.get("axis", self.axis)
-        new_apex = parameters.get("apex", self.apex)
-        new_base_center = parameters.get("base_center", self.base_center)
-        new_radius = parameters.get("radius", self.radius)
-        new_height = parameters.get("height", self.height)
-        new_semi_angle = parameters.get("semi_angle", self.semi_angle)
+    def _apply_params(self, parameters: Dict):
+        self.axis = self.normalize_vector(parameters.get("axis", self.axis))
+        self.apex = parameters.get("apex", self.apex)
+        self.base_center = parameters.get("base_center", self.base_center)
+        self.radius = parameters.get("radius", self.radius)
+        self.height = parameters.get("height", self.height)
+        self.semi_angle = parameters.get("semi_angle", self.semi_angle)
 
-        # 获取当前参数
-        old_params = self.get_params()
+    def _build_shape(self, parameters: Dict, keep_anchor: bool):
+        axis = self.normalize_vector(parameters.get("axis", self.axis))
+        apex = parameters.get("apex", self.apex)
+        height = parameters.get("height", self.height)
+        radius = parameters.get("radius", self.radius)
 
-        # 检查是否有实质性变化
-        if not self.has_significant_changes(old_params, parameters):
-            print("圆锥体参数无实质性变化，保持原样")
-            return self.original_shape
-
-        # 更新参数
-        self.axis = new_axis
-        self.apex = new_apex
-        self.base_center = new_base_center
-        self.radius = new_radius
-        self.height = new_height
-        self.semi_angle = new_semi_angle
-
-        # 添加到历史
-        new_params = self.get_params()
-        self.parameter_history.append(new_params)
-        self.current_history_index = len(self.parameter_history) - 1
-
-        # 返回原始形状以保留边界
-        return self.original_shape
+        base_center = (
+            apex[0] - axis[0]*height,
+            apex[1] - axis[1]*height,
+            apex[2] - axis[2]*height
+        )
+        ax2 = gp_Ax2(gp_Pnt(*base_center), gp_Dir(*axis))
+        shape = BRepPrimAPI_MakeCone(ax2, radius, 0.0, height).Shape()
+        if keep_anchor and ("apex" not in parameters and "base_center" not in parameters):
+            shape = self._recenter_to_anchor(shape)
+        return shape
 
 
+# ===================================================================================
+# Sphere
+# ===================================================================================
 
 class Sphere(GeometricPrimitive):
-    """球体几何体"""
-
     def __init__(self, faces, center, radius, fitting_score=1.0):
         super().__init__("sphere", faces, fitting_score)
         self.center = center
         self.radius = radius
+        init = self.get_params()
+        self.parameter_history.append(init)
 
-        # 初始化参数历史
-        initial_params = self.get_params()
-        self.parameter_history.append(initial_params)
-        self.current_history_index = 0
+    def get_params(self):
+        p = super().get_params()
+        p.update({"center": self.center, "radius": self.radius})
+        return p
 
-    # 为Sphere类添加create_preview_shape方法
-    def create_preview_shape(self, parameters):
-        """创建球体预览形状"""
-        try:
-            # 提取新参数
-            new_center = parameters.get("center", self.center)
-            new_radius = parameters.get("radius", self.radius)
+    def _apply_params(self, parameters: Dict):
+        self.center = parameters.get("center", self.center)
+        self.radius = parameters.get("radius", self.radius)
 
-            # 创建点
-            center_point = gp_Pnt(*new_center)
-
-            # 创建球体
-            sphere = BRepPrimAPI_MakeSphere(center_point, new_radius).Shape()
-            return sphere
-
-        except Exception as e:
-            print(f"创建球体预览形状失败: {str(e)}")
-            return None
-
-    def get_params(self) -> Dict:
-        params = super().get_params()
-        params.update({
-            "center": self.center,
-            "radius": self.radius
-        })
-        return params
-
-    def rebuild_with_parameters(self, parameters):
-        """基于新参数重建球体"""
-        # 提取新参数
-        new_center = parameters.get("center", self.center)
-        new_radius = parameters.get("radius", self.radius)
-
-        # 获取当前参数
-        old_params = self.get_params()
-
-        # 检查是否有实质性变化
-        if not self.has_significant_changes(old_params, parameters):
-            print("球体参数无实质性变化，保持原样")
-            return self.original_shape
-
-        # 更新参数
-        self.center = new_center
-        self.radius = new_radius
-
-        # 添加到历史
-        new_params = self.get_params()
-        self.parameter_history.append(new_params)
-        self.current_history_index = len(self.parameter_history) - 1
-
-        # 返回原始形状以保留边界
-        return self.original_shape
+    def _build_shape(self, parameters: Dict, keep_anchor: bool):
+        center = parameters.get("center", self.center)
+        radius = parameters.get("radius", self.radius)
+        shape = BRepPrimAPI_MakeSphere(gp_Pnt(*center), radius).Shape()
+        if keep_anchor and "center" not in parameters:
+            shape = self._recenter_to_anchor(shape)
+        return shape
 
 
+# ===================================================================================
+# Torus
+# ===================================================================================
 
 class Torus(GeometricPrimitive):
-    """圆环几何体"""
-
     def __init__(self, faces, axis, center, major_radius, minor_radius, fitting_score=1.0):
         super().__init__("torus", faces, fitting_score)
-        self.axis = axis
+        self.axis = self.normalize_vector(axis)
         self.center = center
-        self.major_radius = major_radius  # 主半径
-        self.minor_radius = minor_radius  # 次半径
+        self.major_radius = major_radius
+        self.minor_radius = minor_radius
+        init = self.get_params()
+        self.parameter_history.append(init)
 
-        # 初始化参数历史
-        initial_params = self.get_params()
-        self.parameter_history.append(initial_params)
-        self.current_history_index = 0
-
-    # 为Torus类添加create_preview_shape方法
-    def create_preview_shape(self, parameters):
-        """创建圆环体预览形状"""
-        try:
-            # 提取新参数
-            new_axis = parameters.get("axis", self.axis)
-            new_center = parameters.get("center", self.center)
-            new_major_radius = parameters.get("major_radius", self.major_radius)
-            new_minor_radius = parameters.get("minor_radius", self.minor_radius)
-
-            # 归一化轴向量
-            norm_axis = self.normalize_vector(new_axis)
-
-            # 创建点和方向
-            center_point = gp_Pnt(*new_center)
-            axis_dir = gp_Dir(*norm_axis)
-
-            # 创建坐标系
-            ax2 = gp_Ax2(center_point, axis_dir)
-
-            # 创建圆环
-            torus = BRepPrimAPI_MakeTorus(ax2, new_major_radius, new_minor_radius).Shape()
-            return torus
-
-        except Exception as e:
-            print(f"创建圆环体预览形状失败: {str(e)}")
-            return None
-
-    def get_params(self) -> Dict:
-        params = super().get_params()
-        params.update({
+    def get_params(self):
+        p = super().get_params()
+        p.update({
             "axis": self.axis,
             "center": self.center,
             "major_radius": self.major_radius,
             "minor_radius": self.minor_radius
         })
-        return params
+        return p
 
-    def rebuild_with_parameters(self, parameters):
-        """基于新参数重建圆环"""
-        # 提取新参数
-        new_axis = parameters.get("axis", self.axis)
-        new_center = parameters.get("center", self.center)
-        new_major_radius = parameters.get("major_radius", self.major_radius)
-        new_minor_radius = parameters.get("minor_radius", self.minor_radius)
+    def _apply_params(self, parameters: Dict):
+        self.axis = self.normalize_vector(parameters.get("axis", self.axis))
+        self.center = parameters.get("center", self.center)
+        self.major_radius = parameters.get("major_radius", self.major_radius)
+        self.minor_radius = parameters.get("minor_radius", self.minor_radius)
 
-        # 获取当前参数
-        old_params = self.get_params()
-
-        # 检查是否有实质性变化
-        if not self.has_significant_changes(old_params, parameters):
-            print("圆环参数无实质性变化，保持原样")
-            return self.original_shape
-
-        # 更新参数
-        self.axis = new_axis
-        self.center = new_center
-        self.major_radius = new_major_radius
-        self.minor_radius = new_minor_radius
-
-        # 添加到历史
-        new_params = self.get_params()
-        self.parameter_history.append(new_params)
-        self.current_history_index = len(self.parameter_history) - 1
-
-        # 返回原始形状以保留边界
-        return self.original_shape
+    def _build_shape(self, parameters: Dict, keep_anchor: bool):
+        axis = self.normalize_vector(parameters.get("axis", self.axis))
+        center = parameters.get("center", self.center)
+        r1 = parameters.get("major_radius", self.major_radius)
+        r2 = parameters.get("minor_radius", self.minor_radius)
+        ax2 = gp_Ax2(gp_Pnt(*center), gp_Dir(*axis))
+        shape = BRepPrimAPI_MakeTorus(ax2, r1, r2).Shape()
+        if keep_anchor and "center" not in parameters:
+            shape = self._recenter_to_anchor(shape)
+        return shape
 
 
+# ===================================================================================
+# Box
+# ===================================================================================
 
 class Box(GeometricPrimitive):
-    """立方体几何体"""
-
     def __init__(self, faces, center=None, corner=None, dx=10.0, dy=10.0, dz=10.0, direction=(0, 0, 1),
                  fitting_score=1.0):
         super().__init__("box", faces, fitting_score)
-
-        # 处理 center 和 corner 参数
         if corner is None and center is not None:
-            self.corner = (center[0] - dx / 2, center[1] - dy / 2, center[2] - dz / 2)
-        else:
-            self.corner = corner or (0, 0, 0)
+            corner = (center[0]-dx/2, center[1]-dy/2, center[2]-dz/2)
+        self.corner = corner if corner else (0, 0, 0)
+        self.dx = dx
+        self.dy = dy
+        self.dz = dz
+        self.direction = self.normalize_vector(direction)
+        init = self.get_params()
+        self.parameter_history.append(init)
 
-        self.dx = dx  # x方向尺寸
-        self.dy = dy  # y方向尺寸
-        self.dz = dz  # z方向尺寸
-        self.direction = direction  # 方向向量
-
-        # 初始化参数历史
-        initial_params = self.get_params()
-        self.parameter_history.append(initial_params)
-        self.current_history_index = 0
-
-    # 为Box类添加create_preview_shape方法
-    def create_preview_shape(self, parameters):
-        """创建立方体预览形状"""
-        try:
-            # 提取新参数
-            new_corner = parameters.get("corner", self.corner)
-            new_dx = parameters.get("dx", self.dx)
-            new_dy = parameters.get("dy", self.dy)
-            new_dz = parameters.get("dz", self.dz)
-            new_direction = parameters.get("direction", self.direction)
-
-            # 创建点
-            corner_point = gp_Pnt(*new_corner)
-
-            # 创建立方体
-            box = BRepPrimAPI_MakeBox(corner_point, new_dx, new_dy, new_dz).Shape()
-
-            # 如果方向不是默认的(0,0,1)，需要进行旋转
-            if new_direction != (0, 0, 1):
-                # 计算从(0,0,1)到新方向的旋转
-                default_dir = (0, 0, 1)
-                rotation_axis = self.cross_product(default_dir, new_direction)
-
-                # 如果叉积接近零，说明方向平行或反平行
-                if (abs(rotation_axis[0]) < 1e-6 and
-                        abs(rotation_axis[1]) < 1e-6 and
-                        abs(rotation_axis[2]) < 1e-6):
-                    # 如果方向相反，绕任意轴旋转180度
-                    if new_direction[2] < 0:
-                        rotation_axis = (1, 0, 0)
-                        angle = math.pi
-                    else:
-                        # 方向相同，不需要旋转
-                        return box
-                else:
-                    # 计算旋转角度
-                    dot_product = (default_dir[0] * new_direction[0] +
-                                   default_dir[1] * new_direction[1] +
-                                   default_dir[2] * new_direction[2])
-                    angle = math.acos(dot_product)
-
-                # 创建旋转变换
-                center_point = gp_Pnt(
-                    new_corner[0] + new_dx / 2,
-                    new_corner[1] + new_dy / 2,
-                    new_corner[2] + new_dz / 2
-                )
-                rotation_axis = self.normalize_vector(rotation_axis)
-                rotation_dir = gp_Dir(*rotation_axis)
-                rotation_ax1 = gp_Ax1(center_point, rotation_dir)
-
-                trsf = gp_Trsf()
-                trsf.SetRotation(rotation_ax1, angle)
-
-                # 应用变换
-                box = BRepBuilderAPI_Transform(box, trsf).Shape()
-
-            return box
-
-        except Exception as e:
-            print(f"创建立方体预览形状失败: {str(e)}")
-            return None
-
-    def get_params(self) -> Dict:
-        params = super().get_params()
-        params.update({
+    def get_params(self):
+        p = super().get_params()
+        p.update({
             "corner": self.corner,
             "dx": self.dx,
             "dy": self.dy,
             "dz": self.dz,
             "direction": self.direction
         })
-        return params
+        return p
 
-    def rebuild_with_parameters(self, parameters):
-        """基于新参数重建立方体"""
-        # 提取新参数
-        new_corner = parameters.get("corner", self.corner)
-        new_dx = parameters.get("dx", self.dx)
-        new_dy = parameters.get("dy", self.dy)
-        new_dz = parameters.get("dz", self.dz)
-        new_direction = parameters.get("direction", self.direction)
+    def _apply_params(self, parameters: Dict):
+        self.corner = parameters.get("corner", self.corner)
+        self.dx = parameters.get("dx", self.dx)
+        self.dy = parameters.get("dy", self.dy)
+        self.dz = parameters.get("dz", self.dz)
+        self.direction = self.normalize_vector(parameters.get("direction", self.direction))
 
-        # 获取当前参数
-        old_params = self.get_params()
+    def _build_shape(self, parameters: Dict, keep_anchor: bool):
+        dx = parameters.get("dx", self.dx)
+        dy = parameters.get("dy", self.dy)
+        dz = parameters.get("dz", self.dz)
+        direction = self.normalize_vector(parameters.get("direction", self.direction))
 
-        # 检查是否有实质性变化
-        if not self.has_significant_changes(old_params, parameters):
-            print("立方体参数无实质性变化，保持原样")
-            return self.original_shape
+        if "corner" in parameters:
+            corner = parameters["corner"]
+        else:
+            if keep_anchor and self.anchor_center:
+                corner = (
+                    self.anchor_center[0] - dx/2.0,
+                    self.anchor_center[1] - dy/2.0,
+                    self.anchor_center[2] - dz/2.0
+                )
+            else:
+                corner = self.corner
 
-        # 更新参数
-        self.corner = new_corner
-        self.dx = new_dx
-        self.dy = new_dy
-        self.dz = new_dz
-        self.direction = new_direction
+        shape = BRepPrimAPI_MakeBox(gp_Pnt(*corner), dx, dy, dz).Shape()
 
-        # 添加到历史
-        new_params = self.get_params()
-        self.parameter_history.append(new_params)
-        self.current_history_index = len(self.parameter_history) - 1
+        # 方向旋转
+        default = (0, 0, 1)
+        if (abs(direction[0]-default[0]) > 1e-9 or
+            abs(direction[1]-default[1]) > 1e-9 or
+            abs(direction[2]-default[2]) > 1e-9):
 
-        # 返回原始形状以保留边界
-        return self.original_shape
+            cross = self.cross_product(default, direction)
+            clen = math.sqrt(cross[0]**2 + cross[1]**2 + cross[2]**2)
+
+            if clen < 1e-9:
+                # 平行或反向
+                dot = sum(a*b for a, b in zip(default, direction))
+                if dot < 0:
+                    rot_axis = (1, 0, 0)
+                    angle = math.pi
+                else:
+                    angle = 0.0
+                    rot_axis = (0, 0, 1)
+            else:
+                rot_axis = (cross[0]/clen, cross[1]/clen, cross[2]/clen)
+                dot = sum(a*b for a, b in zip(default, direction))
+                dot = max(-1.0, min(1.0, dot))
+                angle = math.acos(dot)
+
+            if abs(angle) > 1e-9:
+                center_point = (
+                    corner[0] + dx/2.0,
+                    corner[1] + dy/2.0,
+                    corner[2] + dz/2.0
+                )
+                ax2 = gp_Ax2(gp_Pnt(*center_point), gp_Dir(*rot_axis))
+                trsf = gp_Trsf()
+                trsf.SetRotation(ax2.Axis(), angle)
+                shape = BRepBuilderAPI_Transform(shape, trsf).Shape()
+
+        return shape
 
 
+# ===================================================================================
+# 其余几何：暂不做真实重建（可按需扩展）
+# ===================================================================================
 
 class FreeFormSurface(GeometricPrimitive):
-    """自由曲面几何体"""
-
     def __init__(self, faces, control_points=None, fitting_score=1.0):
         super().__init__("freeform", faces, fitting_score)
         self.control_points = control_points or []
+        init = self.get_params()
+        self.parameter_history.append(init)
 
-        # 初始化参数历史
-        initial_params = self.get_params()
-        self.parameter_history.append(initial_params)
-        self.current_history_index = 0
+    def get_params(self):
+        p = super().get_params()
+        p.update({"control_points": self.control_points})
+        return p
 
-    # 为FreeFormSurface类添加create_preview_shape方法
-    def create_preview_shape(self, parameters):
-        """创建自由曲面预览形状"""
-        try:
-            # 对于自由曲面，可能需要特定的库进行操作
-            # 由于复杂性，这里提供一个简化的实现，仅用于预览
-            from OCC.Core.gp import gp_Pnt2d
-            from OCC.Core.Geom import Geom_BezierSurface
-            from OCC.Core.TColgp import TColgp_Array2OfPnt
+    def _apply_params(self, parameters: Dict):
+        self.control_points = parameters.get("control_points", self.control_points)
 
-            # 提取新参数
-            new_control_points = parameters.get("control_points", self.control_points)
-
-            # 如果没有控制点或太少，创建默认的控制点网格
-            if not new_control_points or len(new_control_points) < 4:
-                # 创建4x4网格的控制点
-                rows, cols = 4, 4
-                ctrl_points = TColgp_Array2OfPnt(1, rows, 1, cols)
-
-                # 设置控制点形成一个简单的曲面
-                for i in range(1, rows + 1):
-                    for j in range(1, cols + 1):
-                        x = (i - 1) * 10.0 / (rows - 1) - 5.0
-                        y = (j - 1) * 10.0 / (cols - 1) - 5.0
-                        # 创建一个简单的波浪形状
-                        z = math.sin(x) * math.cos(y) * 2.0
-                        ctrl_points.SetValue(i, j, gp_Pnt(x, y, z))
-            else:
-                # 使用提供的控制点
-                # 假设控制点是一个2D网格形式的列表
-                rows = int(math.sqrt(len(new_control_points)))
-                cols = rows  # 假设是方形网格
-
-                ctrl_points = TColgp_Array2OfPnt(1, rows, 1, cols)
-                idx = 0
-                for i in range(1, rows + 1):
-                    for j in range(1, cols + 1):
-                        if idx < len(new_control_points):
-                            pt = new_control_points[idx]
-                            ctrl_points.SetValue(i, j, gp_Pnt(*pt))
-                            idx += 1
-
-            # 创建Bezier曲面
-            bezier_surface = Geom_BezierSurface(ctrl_points)
-
-            # 创建面
-            from OCC.Core.GeomAPI import GeomAPI_PointsToBSplineSurface
-            from OCC.Core.TColgp import TColgp_Array2OfPnt
-            from OCC.Core.GeomAbs import GeomAbs_C2
-            from OCC.Core.GeomAPI import GeomAPI_ProjectPointOnSurf
-
-            # 采样bezier曲面上的点
-            sample_points = TColgp_Array2OfPnt(1, 10, 1, 10)
-            for i in range(1, 11):
-                u = (i - 1) / 9.0
-                for j in range(1, 11):
-                    v = (j - 1) / 9.0
-                    pnt = bezier_surface.Value(u, v)
-                    sample_points.SetValue(i, j, pnt)
-
-            # 从采样点创建BSpline曲面
-            bspline_builder = GeomAPI_PointsToBSplineSurface(sample_points, 3, 3, GeomAbs_C2, 0.001)
-            bspline_surface = bspline_builder.Surface()
-
-            # 创建面
-            face = BRepBuilderAPI_MakeFace(bspline_surface, 0.0, 1.0, 0.0, 1.0, 0.001).Face()
-            return face
-
-        except Exception as e:
-            print(f"创建自由曲面预览形状失败: {str(e)}")
-            return None
-
-    def get_params(self) -> Dict:
-        params = super().get_params()
-        params.update({
-            "control_points": self.control_points
-        })
-        return params
-
-    def rebuild_with_parameters(self, parameters):
-        """基于新参数重建自由曲面"""
-        # 提取新参数
-        new_control_points = parameters.get("control_points", self.control_points)
-
-        # 获取当前参数
-        old_params = self.get_params()
-
-        # 检查是否有实质性变化
-        if not self.has_significant_changes(old_params, parameters):
-            print("自由曲面参数无实质性变化，保持原样")
-            return self.original_shape
-
-        # 更新参数
-        self.control_points = new_control_points
-
-        # 添加到历史
-        new_params = self.get_params()
-        self.parameter_history.append(new_params)
-        self.current_history_index = len(self.parameter_history) - 1
-
-        # 返回原始形状以保留边界
+    def _build_shape(self, parameters: Dict, keep_anchor: bool):
         return self.original_shape
 
 
-
 class Prism(GeometricPrimitive):
-    """棱柱几何体"""
-
     def __init__(self, faces, base_center, axis, height, base_points=None, fitting_score=1.0):
         super().__init__("prism", faces, fitting_score)
         self.base_center = base_center
-        self.axis = axis
+        self.axis = self.normalize_vector(axis)
         self.height = height
         self.base_points = base_points or []
+        init = self.get_params()
+        self.parameter_history.append(init)
 
-        # 初始化参数历史
-        initial_params = self.get_params()
-        self.parameter_history.append(initial_params)
-        self.current_history_index = 0
-
-    # 为Prism类添加create_preview_shape方法
-    def create_preview_shape(self, parameters):
-        """创建棱柱预览形状"""
-        try:
-            # 提取新参数
-            new_base_center = parameters.get("base_center", self.base_center)
-            new_axis = parameters.get("axis", self.axis)
-            new_height = parameters.get("height", self.height)
-            new_base_points = parameters.get("base_points", self.base_points)
-
-            # 如果没有基础点，创建一个默认的正多边形
-            if not new_base_points:
-                # 创建一个正六边形
-                sides = 6
-                radius = 5.0  # 默认半径
-                points = []
-
-                for i in range(sides):
-                    angle = 2 * math.pi * i / sides
-                    x = new_base_center[0] + radius * math.cos(angle)
-                    y = new_base_center[1] + radius * math.sin(angle)
-                    z = new_base_center[2]
-                    points.append((x, y, z))
-
-                new_base_points = points
-
-            # 创建底面轮廓
-            from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakePolygon
-
-            # 创建多边形
-            polygon_builder = BRepBuilderAPI_MakePolygon()
-            for point in new_base_points:
-                polygon_builder.Add(gp_Pnt(*point))
-            polygon_builder.Close()  # 闭合多边形
-
-            # 获取创建的线框
-            base_wire = polygon_builder.Wire()
-
-            # 创建底面
-            base_face = BRepBuilderAPI_MakeFace(base_wire).Face()
-
-            # 沿着轴向拉伸创建棱柱
-            from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakePrism
-
-            # 归一化轴向量
-            norm_axis = self.normalize_vector(new_axis)
-
-            # 创建方向向量
-            direction = gp_Vec(norm_axis[0] * new_height,
-                               norm_axis[1] * new_height,
-                               norm_axis[2] * new_height)
-
-            # 创建棱柱
-            prism = BRepPrimAPI_MakePrism(base_face, direction).Shape()
-            return prism
-
-        except Exception as e:
-            print(f"创建棱柱预览形状失败: {str(e)}")
-            return None
-
-    def get_params(self) -> Dict:
-        params = super().get_params()
-        params.update({
+    def get_params(self):
+        p = super().get_params()
+        p.update({
             "base_center": self.base_center,
             "axis": self.axis,
             "height": self.height,
             "base_points": self.base_points
         })
-        return params
+        return p
 
-    def rebuild_with_parameters(self, parameters):
-        """基于新参数重建棱柱"""
-        # 提取新参数
-        new_base_center = parameters.get("base_center", self.base_center)
-        new_axis = parameters.get("axis", self.axis)
-        new_height = parameters.get("height", self.height)
-        new_base_points = parameters.get("base_points", self.base_points)
+    def _apply_params(self, parameters: Dict):
+        self.base_center = parameters.get("base_center", self.base_center)
+        self.axis = self.normalize_vector(parameters.get("axis", self.axis))
+        self.height = parameters.get("height", self.height)
+        self.base_points = parameters.get("base_points", self.base_points)
 
-        # 获取当前参数
-        old_params = self.get_params()
-
-        # 检查是否有实质性变化
-        if not self.has_significant_changes(old_params, parameters):
-            print("棱柱参数无实质性变化，保持原样")
-            return self.original_shape
-
-        # 更新参数
-        self.base_center = new_base_center
-        self.axis = new_axis
-        self.height = new_height
-        self.base_points = new_base_points
-
-        # 添加到历史
-        new_params = self.get_params()
-        self.parameter_history.append(new_params)
-        self.current_history_index = len(self.parameter_history) - 1
-
-        # 返回原始形状以保留边界
+    def _build_shape(self, parameters: Dict, keep_anchor: bool):
         return self.original_shape
 
 
-
 class Pyramid(GeometricPrimitive):
-    """棱锥几何体"""
-
     def __init__(self, faces, base_center, apex, base_points=None, fitting_score=1.0):
         super().__init__("pyramid", faces, fitting_score)
         self.base_center = base_center
         self.apex = apex
         self.base_points = base_points or []
+        init = self.get_params()
+        self.parameter_history.append(init)
 
-        # 初始化参数历史
-        initial_params = self.get_params()
-        self.parameter_history.append(initial_params)
-        self.current_history_index = 0
-
-    # 为Pyramid类添加create_preview_shape方法
-    def create_preview_shape(self, parameters):
-        """创建棱锥预览形状"""
-        try:
-            # 添加本地导入
-            from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon, \
-                BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeEdge
-            from OCC.Core.BRep import BRep_Builder
-            from OCC.Core.TopoDS import TopoDS_Compound
-
-            # 提取新参数
-            new_base_center = parameters.get("base_center", self.base_center)
-            new_apex = parameters.get("apex", self.apex)  # 确保 self.apex 有值
-
-            # 添加检查确保 new_apex 有值
-            if new_apex is None:
-                print("顶点坐标为空，使用默认值")
-                new_apex = (0, 0, 10)  # 设置默认顶点坐标
-
-            new_base_points = parameters.get("base_points", self.base_points)
-
-            # 如果没有基础点，创建一个默认的正多边形
-            if not new_base_points:
-                # 创建一个正方形底面
-                sides = 4
-                radius = 5.0  # 默认半径
-                points = []
-
-                for i in range(sides):
-                    angle = 2 * math.pi * i / sides
-                    x = new_base_center[0] + radius * math.cos(angle)
-                    y = new_base_center[1] + radius * math.sin(angle)
-                    z = new_base_center[2]
-                    points.append((x, y, z))
-
-                new_base_points = points
-
-            # 创建底面轮廓
-            # 创建多边形
-            polygon_builder = BRepBuilderAPI_MakePolygon()
-            for point in new_base_points:
-                polygon_builder.Add(gp_Pnt(*point))
-            polygon_builder.Close()  # 闭合多边形
-
-            # 获取创建的线框
-            base_wire = polygon_builder.Wire()
-
-            # 创建底面
-            base_face = BRepBuilderAPI_MakeFace(base_wire).Face()
-
-            # 创建顶点
-            apex_point = gp_Pnt(*new_apex)
-
-            # 创建复合体
-            compound = TopoDS_Compound()
-            builder = BRep_Builder()
-            builder.MakeCompound(compound)
-
-            # 添加底面
-            builder.Add(compound, base_face)
-
-            # 创建从顶点到底面各点的三角形面
-            for i in range(len(new_base_points)):
-                p1 = gp_Pnt(*new_base_points[i])
-                p2 = gp_Pnt(*new_base_points[(i + 1) % len(new_base_points)])
-
-                # 创建三角形的三条边
-                edge1 = BRepBuilderAPI_MakeEdge(apex_point, p1).Edge()
-                edge2 = BRepBuilderAPI_MakeEdge(p1, p2).Edge()
-                edge3 = BRepBuilderAPI_MakeEdge(p2, apex_point).Edge()
-
-                # 创建三角形线框
-                wire = BRepBuilderAPI_MakeWire(edge1, edge2, edge3).Wire()
-
-                # 创建三角形面
-                triangle = BRepBuilderAPI_MakeFace(wire).Face()
-
-                # 添加到复合体
-                builder.Add(compound, triangle)
-
-            return compound
-
-        except Exception as e:
-            print(f"创建棱锥预览形状失败: {str(e)}")
-            return None
-
-    def get_params(self) -> Dict:
-        params = super().get_params()
-        params.update({
+    def get_params(self):
+        p = super().get_params()
+        p.update({
             "base_center": self.base_center,
             "apex": self.apex,
             "base_points": self.base_points
         })
-        return params
+        return p
 
-    def rebuild_with_parameters(self, parameters):
-        """基于新参数重建棱锥"""
-        # 提取新参数
-        new_base_center = parameters.get("base_center", self.base_center)
-        new_apex = parameters.get("apex", self.apex)
-        new_base_points = parameters.get("base_points", self.base_points)
+    def _apply_params(self, parameters: Dict):
+        self.base_center = parameters.get("base_center", self.base_center)
+        self.apex = parameters.get("apex", self.apex)
+        self.base_points = parameters.get("base_points", self.base_points)
 
-        # 获取当前参数
-        old_params = self.get_params()
-
-        # 检查是否有实质性变化
-        if not self.has_significant_changes(old_params, parameters):
-            print("棱锥参数无实质性变化，保持原样")
-            return self.original_shape
-
-        # 更新参数
-        self.base_center = new_base_center
-        self.apex = new_apex
-        self.base_points = new_base_points
-
-        # 添加到历史
-        new_params = self.get_params()
-        self.parameter_history.append(new_params)
-        self.current_history_index = len(self.parameter_history) - 1
-
-        # 返回原始形状以保留边界
+    def _build_shape(self, parameters: Dict, keep_anchor: bool):
         return self.original_shape
 
 
-
 class Polyhedron(GeometricPrimitive):
-    """多面体几何体"""
-
     def __init__(self, faces, vertices, center, fitting_score=1.0):
         super().__init__("polyhedron", faces, fitting_score)
         self.vertices = vertices
         self.center = center
+        init = self.get_params()
+        self.parameter_history.append(init)
 
-        # 初始化参数历史
-        initial_params = self.get_params()
-        self.parameter_history.append(initial_params)
-        self.current_history_index = 0
-
-    # 为Polyhedron类添加create_preview_shape方法
-    def create_preview_shape(self, parameters):
-        """创建多面体预览形状"""
-        try:
-            # 提取新参数
-            new_vertices = parameters.get("vertices", self.vertices)
-            new_center = parameters.get("center", self.center)
-
-            # 对于多面体，我们需要有足够的信息来重建它
-            # 由于没有足够的信息来创建面，我们使用一个简化的方法
-            # 创建一个围绕中心的凸包
-
-            # 如果没有顶点或太少，创建一个默认的正二十面体
-            if not new_vertices or len(new_vertices) < 4:
-                # 创建一个默认的球形
-                center_point = gp_Pnt(*new_center)
-                radius = 5.0  # 默认半径
-                sphere = BRepPrimAPI_MakeSphere(center_point, radius).Shape()
-                return sphere
-
-            # 创建复合体
-            from OCC.Core.TopoDS import TopoDS_Compound
-            from OCC.Core.BRep import BRep_Builder
-
-            compound = TopoDS_Compound()
-            builder = BRep_Builder()
-            builder.MakeCompound(compound)
-
-            # 创建简化的多面体 - 使用凸包算法
-            try:
-                from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeVertex
-                from OCC.Core.BRepOffsetAPI import BRepOffsetAPI_Sewing
-                from OCC.Core.TopoDS import topods
-
-                # 创建点
-                vertices = []
-                for vertex in new_vertices:
-                    pnt = gp_Pnt(*vertex)
-                    vert = BRepBuilderAPI_MakeVertex(pnt).Vertex()
-                    vertices.append(vert)
-
-                # 创建凸包
-                from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakePolygon
-                from OCC.Core.TopTools import TopTools_ListOfShape
-
-                # 使用德劳内三角化或其他方法创建凸包
-                # 简化起见，这里我们创建一个连接所有点的多边形
-                for i in range(len(vertices) - 2):
-                    for j in range(i + 1, len(vertices) - 1):
-                        for k in range(j + 1, len(vertices)):
-                            # 创建三角形
-                            v1 = topods.Vertex(vertices[i])
-                            v2 = topods.Vertex(vertices[j])
-                            v3 = topods.Vertex(vertices[k])
-
-                            p1 = BRep_Tool.Pnt(v1)
-                            p2 = BRep_Tool.Pnt(v2)
-                            p3 = BRep_Tool.Pnt(v3)
-
-                            # 创建三角形的三条边
-                            edge1 = BRepBuilderAPI_MakeEdge(p1, p2).Edge()
-                            edge2 = BRepBuilderAPI_MakeEdge(p2, p3).Edge()
-                            edge3 = BRepBuilderAPI_MakeEdge(p3, p1).Edge()
-
-                            # 创建三角形线框
-                            wire = BRepBuilderAPI_MakeWire(edge1, edge2, edge3).Wire()
-
-                            # 创建三角形面
-                            try:
-                                triangle = BRepBuilderAPI_MakeFace(wire).Face()
-
-                                # 添加到复合体
-                                builder.Add(compound, triangle)
-                            except:
-                                # 如果创建面失败，跳过
-                                pass
-
-                return compound
-            except Exception as inner_e:
-                print(f"创建多面体凸包失败，使用替代方法: {str(inner_e)}")
-
-                # 如果凸包创建失败，创建一个简单的球体作为替代
-                center_point = gp_Pnt(*new_center)
-                radius = 5.0  # 默认半径
-                sphere = BRepPrimAPI_MakeSphere(center_point, radius).Shape()
-                return sphere
-
-        except Exception as e:
-            print(f"创建多面体预览形状失败: {str(e)}")
-            # 返回一个简单的球体作为替代
-            try:
-                center_point = gp_Pnt(*new_center if new_center else self.center)
-                radius = 5.0
-                sphere = BRepPrimAPI_MakeSphere(center_point, radius).Shape()
-                return sphere
-            except:
-                return None
-
-    def get_params(self) -> Dict:
-        params = super().get_params()
-        params.update({
+    def get_params(self):
+        p = super().get_params()
+        p.update({
             "vertices": self.vertices,
             "center": self.center
         })
-        return params
+        return p
 
-    def rebuild_with_parameters(self, parameters):
-        """基于新参数重建多面体"""
-        # 提取新参数
-        new_vertices = parameters.get("vertices", self.vertices)
-        new_center = parameters.get("center", self.center)
+    def _apply_params(self, parameters: Dict):
+        self.vertices = parameters.get("vertices", self.vertices)
+        self.center = parameters.get("center", self.center)
 
-        # 获取当前参数
-        old_params = self.get_params()
-
-        # 检查是否有实质性变化
-        if not self.has_significant_changes(old_params, parameters):
-            print("多面体参数无实质性变化，保持原样")
-            return self.original_shape
-
-        # 更新参数
-        self.vertices = new_vertices
-        self.center = new_center
-
-        # 添加到历史
-        new_params = self.get_params()
-        self.parameter_history.append(new_params)
-        self.current_history_index = len(self.parameter_history) - 1
-
-        # 返回原始形状以保留边界
+    def _build_shape(self, parameters: Dict, keep_anchor: bool):
         return self.original_shape
