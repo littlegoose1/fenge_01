@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QLabel,
                                QWidget, QTreeWidget, QTreeWidgetItem, QProgressBar,
                                QStatusBar, QMessageBox, QGroupBox, QFormLayout,
                                QDoubleSpinBox, QPushButton, QSlider, QToolBar,
-                               QCheckBox)  # 添加QCheckBox导入
+                               QCheckBox, QDialog)  # 添加QCheckBox导入
 from PySide6.QtCore import Qt, Signal, Slot, QSize
 from PySide6.QtGui import QIcon, QAction
 
@@ -18,10 +18,13 @@ load_backend("pyside6")  # 使用正确的后端名称 "pyside6" 而不是 "qt-p
 from OCC.Display.qtDisplay import qtViewer3d
 
 from ..model.geometry import GeometricPrimitive
+from ..ui.solve_dialog import SolveAssemblyDialog  # 新增：装配求解对话框导入
 
 
 class ParameterControlPanel(QWidget):
-    """参数控制面板 - 显示和编辑几何体参数"""
+    """
+    参数控制面板 - 显示和编辑几何体参数
+    """
 
     parameterChanged = Signal(dict)
     previewToggled = Signal(bool)  # 添加新信号
@@ -57,7 +60,9 @@ class ParameterControlPanel(QWidget):
         self.main_layout.addStretch(1)
 
     def _on_preview_toggled(self, state):
-        """处理预览开关状态变化"""
+        """
+        处理预览开关状态变化
+        """
         # 添加调试输出
         print(f"预览复选框状态变化: {state}")
 
@@ -69,7 +74,9 @@ class ParameterControlPanel(QWidget):
         self.previewToggled.emit(is_checked)
 
     def set_primitive(self, primitive: GeometricPrimitive):
-        """设置当前几何体并更新界面"""
+        """
+        设置当前几何体并更新界面
+        """
         # 清除现有控件
         self._clear_form()
 
@@ -92,7 +99,9 @@ class ParameterControlPanel(QWidget):
             # 其他类型可以按需添加
 
     def _clear_form(self):
-        """清除表单中的所有控件"""
+        """
+        清除表单中的所有控件
+        """
         # 移除所有行
         while self.form_layout.rowCount() > 0:
             # 获取行中的控件
@@ -119,7 +128,9 @@ class ParameterControlPanel(QWidget):
         self.controls.clear()
 
     def _add_vector_control(self, name, value):
-        """添加向量(x,y,z)控件"""
+        """
+        添加向量(x,y,z)控件
+        """
         # 创建向量编辑的组合控件
         vector_widget = QWidget()
         vector_layout = QHBoxLayout(vector_widget)
@@ -157,7 +168,9 @@ class ParameterControlPanel(QWidget):
         self.controls[name] = (x_spin, y_spin, z_spin)
 
     def _add_numeric_control(self, name, value):
-        """添加数值编辑控件"""
+        """
+        添加数值编辑控件
+        """
         spin_box = QDoubleSpinBox()
 
         # 设置范围和精度
@@ -186,7 +199,9 @@ class ParameterControlPanel(QWidget):
         self.controls[name] = spin_box
 
     def _on_apply(self):
-        """应用按钮点击事件"""
+        """
+        应用按钮点击事件
+        """
         # 收集修改后的参数
         new_params = {"type": self.parameters.get("type", "")}
 
@@ -204,7 +219,9 @@ class ParameterControlPanel(QWidget):
 
 
 class GeometryTreeWidget(QTreeWidget):
-    """几何体树形视图"""
+    """
+    几何体树形视图
+    """
 
     primitiveSelected = Signal(int)
 
@@ -222,12 +239,16 @@ class GeometryTreeWidget(QTreeWidget):
         self.primitives = []
 
     def set_primitives(self, primitives: List[GeometricPrimitive]):
-        """设置几何体列表"""
+        """
+        设置几何体列表
+        """
         self.primitives = primitives
         self._update_tree()
 
     def _update_tree(self):
-        """更新树形视图"""
+        """
+        更新树形视图
+        """
         self.clear()
 
         # 添加每个几何体
@@ -253,7 +274,9 @@ class GeometryTreeWidget(QTreeWidget):
             self.addTopLevelItem(item)
 
     def _on_selection_changed(self):
-        """处理选择变化"""
+        """
+        处理选择变化
+        """
         selected_items = self.selectedItems()
         if selected_items:
             # 获取顶层项
@@ -268,7 +291,9 @@ class GeometryTreeWidget(QTreeWidget):
 
 
 class MainWindow(QMainWindow):
-    """主窗口"""
+    """
+    主窗口
+    """
 
     # 定义信号
     open_file_requested = Signal(str)
@@ -277,6 +302,7 @@ class MainWindow(QMainWindow):
     update_preview_requested = Signal(int, bool)  # 添加预览更新信号
     undo_requested = Signal(int)
     redo_requested = Signal(int)
+    solve_assembly_requested = Signal(str, int)  # 新增：求解装配请求 (assembly_id, iterations)
 
     def __init__(self):
         super().__init__()
@@ -311,7 +337,9 @@ class MainWindow(QMainWindow):
         self.current_primitive_index = -1
 
     def _create_menus(self):
-        """创建菜单"""
+        """
+        创建菜单
+        """
         # 文件菜单
         file_menu = self.menuBar().addMenu("文件")
 
@@ -352,6 +380,14 @@ class MainWindow(QMainWindow):
         reset_view_action.triggered.connect(self._on_reset_view)
         view_menu.addAction(reset_view_action)
 
+        # 新增：装配菜单
+        asm_menu = self.menuBar().addMenu("装配")
+        solve_action = QAction("求解装配...", self)
+        solve_action.setShortcut("Ctrl+Alt+S")
+        solve_action.setStatusTip("根据约束求解装配节点位姿")
+        solve_action.triggered.connect(self._on_solve_assembly)
+        asm_menu.addAction(solve_action)
+
         # 帮助菜单
         help_menu = self.menuBar().addMenu("帮助")
 
@@ -360,7 +396,9 @@ class MainWindow(QMainWindow):
         help_menu.addAction(about_action)
 
     def _create_toolbars(self):
-        """创建工具栏"""
+        """
+        创建工具栏
+        """
         # 主工具栏
         main_toolbar = QToolBar("主工具栏")
         self.addToolBar(main_toolbar)
@@ -385,7 +423,9 @@ class MainWindow(QMainWindow):
         main_toolbar.addAction(redo_action)
 
     def _create_layout(self):
-        """创建主布局"""
+        """
+        创建主布局
+        """
         # 中心部件
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -436,7 +476,9 @@ class MainWindow(QMainWindow):
         self._init_view()
 
     def _init_view(self):
-        """初始化3D视图"""
+        """
+        初始3D视图
+        """
         # 修复: 应该设置为QApplication实例而不是MainWindow实例
         from PySide6.QtWidgets import QApplication
         self.canvas.qApp = QApplication.instance()
@@ -458,7 +500,9 @@ class MainWindow(QMainWindow):
         self.canvas._display.FitAll()
 
     def _on_preview_toggled(self, enabled):
-        """处理预览开关状态变化"""
+        """
+        处理预览开关状态变化
+        """
         print(f"MainWindow 收到预览状态切换: {enabled}")
         self.preview_enabled = enabled
 
@@ -469,12 +513,16 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def set_status(self, message: str):
-        """设置状态栏信息"""
+        """
+        设置状态栏信息
+        """
         self.statusBar.showMessage(message)
 
     @Slot(int)
     def set_progress(self, percent: int):
-        """设置进度条"""
+        """
+        设置进度条
+        """
         if percent < 0:
             self.progressBar.setVisible(False)
         else:
@@ -482,15 +530,21 @@ class MainWindow(QMainWindow):
             self.progressBar.setValue(percent)
 
     def show_error(self, title: str, message: str):
-        """显示错误对话框"""
+        """
+        显示错误对话框
+        """
         QMessageBox.critical(self, title, message)
 
     def show_info(self, title: str, message: str):
-        """显示信息对话框"""
+        """
+        显示信息对话框
+        """
         QMessageBox.information(self, title, message)
 
     def set_primitives(self, primitives: List[GeometricPrimitive]):
-        """设置几何体列表并更新UI"""
+        """
+        设置几何体列表并更新UI
+        """
         # 更新树
         self.geometry_tree.set_primitives(primitives)
 
@@ -508,7 +562,9 @@ class MainWindow(QMainWindow):
         self.canvas._display.Repaint()
 
     def update_primitive(self, index: int, new_shape: TopoDS_Shape):
-        """更新几何体显示"""
+        """
+        更新几何体显示
+        """
         # 如果索引有效
         if index >= 0:
             # 清除特定几何体
@@ -533,7 +589,9 @@ class MainWindow(QMainWindow):
             self.canvas._display.Repaint()
 
     def show_original_with_preview(self, geometry_id, original_shape, preview_shape):
-        """显示原始形状和预览形状"""
+        """
+        显示原始形状和预览形状
+        """
         if self.canvas._display is None:
             return
 
@@ -570,7 +628,9 @@ class MainWindow(QMainWindow):
             print(f"显示预览失败: {str(e)}")
 
     def _on_open_file(self):
-        """打开文件事件处理"""
+        """
+        打开文件事件处理
+        """
         file_path, _ = QFileDialog.getOpenFileName(
             self, "打开STEP文件", "", "STEP Files (*.step *.stp);;All Files (*.*)")
 
@@ -578,7 +638,9 @@ class MainWindow(QMainWindow):
             self.open_file_requested.emit(file_path)
 
     def _on_save_file(self):
-        """保存文件事件处理"""
+        """
+        保存文件事件处理
+        """
         file_path, _ = QFileDialog.getSaveFileName(
             self, "保存STEP文件", "", "STEP Files (*.step *.stp)")
 
@@ -590,7 +652,9 @@ class MainWindow(QMainWindow):
             self.save_file_requested.emit(file_path)
 
     def _on_primitive_selected(self, index: int):
-        """几何体选择事件处理"""
+        """
+        几何体选择事件处理
+        """
         self.current_primitive_index = index
 
         # 更新参数面板
@@ -616,7 +680,9 @@ class MainWindow(QMainWindow):
             self.canvas._display.Repaint()
 
     def _on_parameter_changed(self, parameters: Dict[str, Any]):
-        """参数变更事件处理"""
+        """
+        参数变更事件处理
+        """
         if self.current_primitive_index >= 0:
             # 将预览状态与参数一起传递
             params_with_preview = parameters.copy()
@@ -624,22 +690,30 @@ class MainWindow(QMainWindow):
             self.modify_primitive_requested.emit(self.current_primitive_index, params_with_preview)
 
     def _on_undo(self):
-        """撤销事件处理"""
+        """
+        撤销事件处理
+        """
         if self.current_primitive_index >= 0:
             self.undo_requested.emit(self.current_primitive_index)
 
     def _on_redo(self):
-        """重做事件处理"""
+        """
+        重做事件处理
+        """
         if self.current_primitive_index >= 0:
             self.redo_requested.emit(self.current_primitive_index)
 
     def _on_reset_view(self):
-        """重置视图事件处理"""
+        """
+        重置视图事件处理
+        """
         self.canvas._display.View_Iso()
         self.canvas._display.FitAll()
 
     def _on_about(self):
-        """关于对话框"""
+        """
+        关于对话框
+        """
         QMessageBox.about(
             self,
             "关于",
@@ -648,3 +722,19 @@ class MainWindow(QMainWindow):
             "开发者: littlegoose1\n\n"
             "本系统用于CAD模型的几何体分割与参数化，支持多种基本几何体的识别和修改。"
         )
+
+    def _on_solve_assembly(self):
+        """装配 -> 求解装配..."""
+        dlg = SolveAssemblyDialog(self)
+
+        # 兼容 PySide6 不同版本（有的用 DialogCode，有的直接用 Accepted）
+        try:
+            accepted_code = QDialog.DialogCode.Accepted
+        except AttributeError:
+            accepted_code = QDialog.Accepted
+
+        if dlg.exec() != accepted_code:
+            return
+
+        asm_id, iterations = dlg.values()
+        self.solve_assembly_requested.emit(asm_id or "", iterations)

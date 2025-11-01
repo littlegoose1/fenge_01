@@ -7,10 +7,13 @@ from ..model.geometry import GeometricPrimitive
 from ..model.io import StepFileHandler
 from ..model.segmentation import GeometrySegmentationProcessor
 from ..view.main_window import MainWindow
+from ..services.solver_service import SolveAssemblyWorker  # 新增导入
 
 
 class ApplicationController(QObject):
-    """应用程序控制器 - 连接视图和模型"""
+    """
+    应用程序控制器 - 连接视图和模型
+    """
 
     def __init__(self, main_window: MainWindow):
         super().__init__()
@@ -33,10 +36,16 @@ class ApplicationController(QObject):
         self.main_window.update_preview_requested.connect(self.update_preview)  # 连接预览信号
         self.main_window.undo_requested.connect(self.undo_modification)
         self.main_window.redo_requested.connect(self.redo_modification)
+        self.main_window.solve_assembly_requested.connect(self.solve_assembly)  # 新增
+
+        # 保存后台任务引用，避免被回收
+        self._workers: list[SolveAssemblyWorker] = []
 
     @Slot(str)
     def open_file(self, file_path: str):
-        """打开STEP文件并处理"""
+        """
+        打开STEP文件并处理
+        """
         try:
             # 加载STEP文件
             self.main_window.set_status(f"正在加载文件: {file_path}")
@@ -56,7 +65,9 @@ class ApplicationController(QObject):
 
     @Slot(str)
     def save_file(self, file_path: str):
-        """保存修改后的模型"""
+        """
+        保存修改后的模型
+        """
         try:
             success = self.io_handler.export_primitives(
                 self.primitives, self.modified_shapes, file_path)
@@ -73,7 +84,9 @@ class ApplicationController(QObject):
 
     @Slot(int, dict)
     def modify_primitive(self, index: int, parameters: Dict[str, Any]):
-        """修改几何体参数"""
+        """
+        修改几何体参数
+        """
         if 0 <= index < len(self.primitives):
             primitive = self.primitives[index]
 
@@ -127,7 +140,9 @@ class ApplicationController(QObject):
 
     @Slot(int, bool)
     def update_preview(self, index: int, show_preview: bool):
-        """更新预览显示状态"""
+        """
+        更新预览显示状态
+        """
         print(f"控制器收到预览更新请求：索引 {index}, 预览状态: {show_preview}")
 
         if 0 <= index < len(self.primitives):
@@ -164,7 +179,9 @@ class ApplicationController(QObject):
 
     @Slot(int)
     def undo_modification(self, index: int):
-        """撤销几何体修改"""
+        """
+        撤销几何体修改
+        """
         if 0 <= index < len(self.primitives):
             primitive = self.primitives[index]
 
@@ -189,7 +206,9 @@ class ApplicationController(QObject):
 
     @Slot(int)
     def redo_modification(self, index: int):
-        """重做几何体修改"""
+        """
+        重做几何体修改
+        """
         if 0 <= index < len(self.primitives):
             primitive = self.primitives[index]
 
@@ -211,3 +230,30 @@ class ApplicationController(QObject):
 
             except Exception as e:
                 self.main_window.show_error("重做失败", f"无法重做修改: {str(e)}")
+
+    @Slot(str, int)
+    def solve_assembly(self, assembly_id: str, iterations: int):
+        """
+        启动‘求解装配’后台任务
+        """
+        asm_id = assembly_id or None
+        worker = SolveAssemblyWorker(asm_id, iterations, self)
+        self._workers.append(worker)
+
+        def on_finished(success: bool, message: str, used_asm_id: str):
+            # 弹窗提示并更新状态栏
+            if success:
+                self.main_window.show_info("求解完成", message)
+                self.main_window.set_status(f"求解完成（装配: {used_asm_id or '最新'}，迭代: {iterations}）")
+            else:
+                self.main_window.show_error("求解失败", message)
+                self.main_window.set_status("求解失败")
+            # 回收 worker 引用
+            try:
+                self._workers.remove(worker)
+            except ValueError:
+                pass
+
+        worker.finished.connect(on_finished)
+        self.main_window.set_status(f"开始求解装配（装配: {asm_id or '最新'}，迭代: {iterations}）")
+        worker.start()
