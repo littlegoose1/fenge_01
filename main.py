@@ -7,6 +7,7 @@ import os
 import platform
 
 from PySide6.QtWidgets import QApplication
+from dotenv import load_dotenv, find_dotenv
 
 from src.view.main_window import MainWindow
 from src.controller.app_controller import ApplicationController
@@ -14,6 +15,12 @@ from src.controller.app_controller import ApplicationController
 
 def setup_environment():
     """设置运行环境"""
+    # 先加载 .env（优先放最前，确保后续用到的环境变量已生效）
+    dotenv_path = find_dotenv(usecwd=True)
+    if dotenv_path:
+        load_dotenv(dotenv_path=dotenv_path, override=False)
+    else:
+        print("[env] .env 未找到（将仅使用系统环境变量）")
     # 添加当前目录到模块搜索路径
     if getattr(sys, 'frozen', False):
         # PyInstaller创建的可执行文件中
