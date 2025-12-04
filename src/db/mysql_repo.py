@@ -21,11 +21,11 @@ class MySQLRepo:
         self.pool = pooling.MySQLConnectionPool(
             pool_name="cad_pool",
             pool_size=5,
-            host=_env("MYSQL_HOST", "127.0.0.1"),
-            port=int(_env("MYSQL_PORT", "3306")),
-            user=_env("MYSQL_USER", "root"),
-            password=_env("MYSQL_PASSWORD", ""),
-            database=_env("MYSQL_DB", "equip_lib"),
+            host=_env("DB_HOST", "127.0.0.1"),  # ← 修改
+            port=int(_env("DB_PORT", "3306")),  # ← 修改
+            user=_env("DB_USER", "root"),  # ← 修改
+            password=_env("DB_PASS", ""),  # ← 修改（关键）
+            database=_env("DB_NAME", "equip_lib"),  # ← 修改
             charset="utf8mb4",
             use_pure=True,
         )

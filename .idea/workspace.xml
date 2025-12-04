@@ -5,10 +5,16 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="3bc9585e-2f83-4858-b9c1-31eb8dede24b" name="更改" comment="1">
+      <change afterPath="$PROJECT_DIR$/scripts/demo_cooperative_deformation.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/assembly/collision_detector.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/assembly/cooperative_deformation.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/assembly/enhanced_assembly_slover.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/assembly/topology_analyzer.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.env" beforeDir="false" afterPath="$PROJECT_DIR$/.env" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/controller/app_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/controller/app_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/db/mysql_repo.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/db/mysql_repo.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/view/main_window.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/view/main_window.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -52,6 +58,7 @@
   }
 }</component>
   <component name="ProblemsViewState">
+    <option name="autoscrollToSource" value="true" />
     <option name="selectedTabId" value="CurrentFile" />
   </component>
   <component name="ProjectColorInfo">{
@@ -68,6 +75,7 @@
     &quot;Python.__init__.executor&quot;: &quot;Debug&quot;,
     &quot;Python.dbtest.executor&quot;: &quot;Run&quot;,
     &quot;Python.demo_build_assembly.executor&quot;: &quot;Run&quot;,
+    &quot;Python.demo_cooperative_deformation.executor&quot;: &quot;Debug&quot;,
     &quot;Python.dev_reset.executor&quot;: &quot;Run&quot;,
     &quot;Python.main.executor&quot;: &quot;Run&quot;,
     &quot;Python.main_window.executor&quot;: &quot;Run&quot;,
@@ -98,7 +106,7 @@
     </key>
   </component>
   <component name="RunManager" selected="Python.main">
-    <configuration name="demo_build_assembly" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="demo_cooperative_deformation" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="cad_geometry_editor" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -112,7 +120,7 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/scripts/demo_build_assembly.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/scripts/demo_cooperative_deformation.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -238,11 +246,11 @@
     </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.demo_cooperative_deformation" />
         <item itemvalue="Python.text_xcaf_minimal" />
         <item itemvalue="Python.test_import" />
         <item itemvalue="Python.main_window" />
         <item itemvalue="Python.solve_assembly" />
-        <item itemvalue="Python.demo_build_assembly" />
       </list>
     </recent_temporary>
   </component>
@@ -310,7 +318,18 @@
       <workItem from="1762594491119" duration="3801000" />
       <workItem from="1762599054420" duration="796000" />
       <workItem from="1762600185371" duration="3918000" />
-      <workItem from="1762604209101" duration="6474000" />
+      <workItem from="1762604209101" duration="7035000" />
+      <workItem from="1762657507086" duration="723000" />
+      <workItem from="1762659140652" duration="717000" />
+      <workItem from="1762846863842" duration="653000" />
+      <workItem from="1763262432428" duration="612000" />
+      <workItem from="1763362733514" duration="44000" />
+      <workItem from="1764043941309" duration="1158000" />
+      <workItem from="1764477821342" duration="3072000" />
+      <workItem from="1764819389095" duration="1418000" />
+      <workItem from="1764820832292" duration="1645000" />
+      <workItem from="1764829373478" duration="5573000" />
+      <workItem from="1764835834645" duration="1260000" />
     </task>
     <task id="LOCAL-00001" summary="1">
       <option name="closed" value="true" />
@@ -368,7 +387,31 @@
       <option name="project" value="LOCAL" />
       <updated>1762005716306</updated>
     </task>
-    <option name="localTasksCounter" value="8" />
+    <task id="LOCAL-00008" summary="1">
+      <option name="closed" value="true" />
+      <created>1762611078370</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1762611078370</updated>
+    </task>
+    <task id="LOCAL-00009" summary="1">
+      <option name="closed" value="true" />
+      <created>1762611121613</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1762611121613</updated>
+    </task>
+    <task id="LOCAL-00010" summary="1">
+      <option name="closed" value="true" />
+      <created>1762611182640</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1762611182640</updated>
+    </task>
+    <option name="localTasksCounter" value="11" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -485,9 +528,10 @@
     <SUITE FILE_PATH="coverage/cad_geometry_editor$solve_assembly.coverage" NAME="solve_assembly 覆盖结果" MODIFIED="1761376159828" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/cad_geometry_editor$main_window.coverage" NAME="main_window 覆盖结果" MODIFIED="1761380101750" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/src/view" />
     <SUITE FILE_PATH="coverage/cad_geometry_editor$dev_reset.coverage" NAME="dev_reset 覆盖结果" MODIFIED="1761375139988" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
+    <SUITE FILE_PATH="coverage/cad_geometry_editor$demo_cooperative_deformation.coverage" NAME="demo_cooperative_deformation 覆盖结果" MODIFIED="1764831095994" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/cad_geometry_editor$dbtest.coverage" NAME="dbtest 覆盖结果" MODIFIED="1761209393531" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/cad_geometry_editor$text_xcaf_minimal.coverage" NAME="text_xcaf_minimal 覆盖结果" MODIFIED="1762604637657" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/cad_geometry_editor$outbox_worker.coverage" NAME="outbox_worker 覆盖结果" MODIFIED="1761375965053" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
-    <SUITE FILE_PATH="coverage/cad_geometry_editor$main.coverage" NAME="main 覆盖结果" MODIFIED="1762610754177" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/cad_geometry_editor$main.coverage" NAME="main 覆盖结果" MODIFIED="1764836841619" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
   </component>
 </project>

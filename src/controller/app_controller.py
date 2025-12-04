@@ -15,6 +15,11 @@ from ..services.solver_service import SolveAssemblyWorker
 from ..services.assembly_import_service import AssemblyImportService
 from ..db.persistence_service import PersistenceService
 
+# ✅ 新增：导入3.3.2模块
+from ..assembly.topology_analyzer import TopologyAnalyzer, AdjacencyMatrix
+from ..assembly.collision_detector import CollisionDetector
+from ..assembly.cooperative_deformation import CooperativeDeformationEngine, DeformationConstraint
+
 
 class ApplicationController(QObject):
     """
@@ -23,6 +28,7 @@ class ApplicationController(QObject):
     - 打开/保存、参数修改与预览、撤销/重做
     - 导出当前零部件到数据库
     - 装配求解（后台线程）
+    - ✅ 新增：拓扑邻接分析、碰撞检测、协同变形（3.3.2）
     """
 
     def __init__(self, main_window: MainWindow):
@@ -31,8 +37,6 @@ class ApplicationController(QObject):
         # 强制 flat-split 模式，保证稳定导入
         os.environ["ASSEMBLY_IMPORT_FORCE_FLAT"] = "1"
         os.environ["ASSEMBLY_IMPORT_SPLIT_SOLIDS"] = "1"
-        # 可选调试
-        # os.environ["ASSEMBLY_IMPORT_DEBUG"] = "1"
 
         self.main_window = main_window
 
@@ -53,6 +57,23 @@ class ApplicationController(QObject):
         # 后台 workers
         self._workers: list[SolveAssemblyWorker] = []
 
+        # ✅ 新增：3.3.2模块
+        self.topology_analyzer = TopologyAnalyzer(contact_threshold=0.1, angle_threshold=5.0)
+        self.collision_detector = CollisionDetector(
+            penetration_threshold=-0.01,
+            contact_threshold = 0.1,
+            clearance_threshold = 1.0
+        )
+        self.deformation_engine = CooperativeDeformationEngine(
+            stiffness=1.0,
+            max_iterations=50,
+            tolerance=1e-4
+        )
+
+        # ✅ 缓存装配分析结果
+        self.current_adjacency: Optional[AdjacencyMatrix] = None
+        self.current_assembly_nodes: List[Dict[str, Any]] = []
+
         # 处理器回调接入 UI
         self.processor.set_status_callback(self.main_window.set_status)
         self.processor.set_progress_callback(self.main_window.set_progress)
@@ -67,6 +88,11 @@ class ApplicationController(QObject):
         self.main_window.solve_assembly_requested.connect(self.solve_assembly)
         self.main_window.export_part_to_db_requested.connect(self.export_part_to_db)
         self.main_window.import_assembly_requested.connect(self.import_and_store_assembly)
+
+        # ✅ 新增：连接3.3.2功能信号
+        self.main_window.analyze_topology_requested.connect(self.analyze_topology)
+        self.main_window.check_collision_requested.connect(self.check_collision)
+        self.main_window.validate_assembly_requested.connect(self.validate_assembly)
 
     # ---------------- 文件打开/保存 ----------------
     @Slot(str)
@@ -322,3 +348,226 @@ class ApplicationController(QObject):
             f"开始求解装配（装配: {asm_id or '最新'}，迭代: {iterations}）"
         )
         worker.start()
+
+    # ✅ ----------------  3.3.2 新增功能 ----------------
+
+    def _load_assembly_nodes_for_analysis(self, assembly_id: str) -> List[Dict[str, Any]]:
+        """从数据库加载装配节点用于分析"""
+        from ..db.mysql import get_conn
+        from ..db.util import uuid_to_bin, bin_to_uuid
+        from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
+        import json
+
+        # ✅ 处理空字符串或"最新装配"的情况
+        if not assembly_id or assembly_id.strip() == "":
+            print("[DEBUG] 未指定装配ID，查找最新装配...")
+            assembly_id = self._get_latest_assembly_id()
+            if not assembly_id:
+                raise ValueError("数据库中没有装配记录，请先导入装配")
+            print(f"[DEBUG] 使用最新装配ID: {assembly_id}")
+
+        # ✅ 验证UUID格式
+        try:
+            import uuid
+            uuid.UUID(assembly_id)  # 验证格式
+        except ValueError:
+            raise ValueError(
+                f"无效的装配ID格式: {assembly_id}\n请输入有效的UUID（例如: 12345678-1234-1234-1234-123456789abc）")
+
+        sql = """
+              SELECT an.id, an.name, an.transform_json
+              FROM assembly_nodes an
+              WHERE an.assembly_id = %s \
+              """
+
+        conn = get_conn()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(sql, (uuid_to_bin(assembly_id),))
+            rows = cur.fetchall() or []
+
+            if not rows:
+                raise ValueError(f"装配ID {assembly_id} 没有找到任何节点，请检查是否已导入")
+
+            nodes = []
+            for row in rows:
+                node_id = bin_to_uuid(row['id'])
+                transform_data = row.get('transform_json')
+
+                if isinstance(transform_data, (bytes, bytearray)):
+                    transform_data = transform_data.decode('utf-8')
+                if isinstance(transform_data, str):
+                    transform = json.loads(transform_data)
+                else:
+                    transform = transform_data or {"pos": [0, 0, 0], "quat": [1, 0, 0, 0]}
+
+                # TODO: 从STEP文件加载真实几何
+                shape = BRepPrimAPI_MakeBox(10, 10, 10).Shape()
+
+                nodes.append({
+                    'id': node_id,
+                    'name': row.get('name', ''),
+                    'transform': transform,
+                    'shape': shape
+                })
+
+            print(f"[DEBUG] 成功加载 {len(nodes)} 个装配节点")
+            return nodes
+        finally:
+            cur.close()
+            conn.close()
+
+    # ✅ 新增：获取最新装配ID的方法
+    def _get_latest_assembly_id(self) -> Optional[str]:
+        """获取最新的装配ID"""
+        from ..db.mysql import get_conn
+        from ..db.util import bin_to_uuid
+
+        sql = "SELECT id FROM assemblies ORDER BY created_at DESC LIMIT 1"
+        conn = get_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute(sql)
+            row = cur.fetchone()
+            if row:
+                return bin_to_uuid(row[0])
+            return None
+        finally:
+            cur.close()
+            conn.close()
+
+    @Slot(str)
+    def analyze_topology(self, assembly_id: str):
+        """拓扑邻接分析"""
+        try:
+            self.main_window.set_status("正在分析装配拓扑关系...")
+
+            # 加载装配节点
+            nodes = self._load_assembly_nodes_for_analysis(assembly_id)
+            if not nodes:
+                self.main_window.show_error("分析失败", "未找到装配节点")
+                return
+
+            # 执行拓扑分析
+            self.current_adjacency = self.topology_analyzer.analyze_assembly(nodes)
+            self.current_assembly_nodes = nodes
+
+            # 显示结果
+            report = f"""拓扑邻接分析完成
+
+节点数量: {len(self.current_adjacency.node_ids)}
+检测到的接触: {len(self.current_adjacency.contacts)}
+
+接触详情:
+"""
+            for contact in self.current_adjacency.contacts[:10]:  # 最多显示10个
+                report += f"\n• {contact.node_a_id[:8]} ↔ {contact.node_b_id[:8]}"
+                report += f"\n  类型: {contact.contact_type}, 距离: {contact.distance:. 4f}mm"
+
+            if len(self.current_adjacency.contacts) > 10:
+                report += f"\n\n...还有 {len(self.current_adjacency.contacts) - 10} 个接触"
+
+            self.main_window.show_topology_result(report, self.current_adjacency)
+            self.main_window.set_status("拓扑分析完成")
+
+        except Exception as e:
+            self.main_window.show_error("拓扑分析失败", f"分析失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    @Slot(str)
+    def check_collision(self, assembly_id: str):
+        """碰撞检测"""
+        try:
+            self.main_window.set_status("正在执行碰撞检测...")
+
+            # 加载或使用缓存的节点
+            if not self.current_assembly_nodes:
+                nodes = self._load_assembly_nodes_for_analysis(assembly_id)
+            else:
+                nodes = self.current_assembly_nodes
+
+            if not nodes:
+                self.main_window.show_error("检测失败", "未找到装配节点")
+                return
+
+            # 执行碰撞检测
+            collisions = self.collision_detector.detect_collisions(nodes)
+
+            # 显示结果
+            report = f"""碰撞检测完成
+
+总碰撞数: {len(collisions)}
+
+"""
+            penetrations = [c for c in collisions if c.collision_type == 'penetration']
+            contacts = [c for c in collisions if c.collision_type == 'contact']
+
+            if penetrations:
+                report += f"⚠️ 干涉穿透: {len(penetrations)} 个\n"
+                for p in penetrations[:5]:
+                    report += f"  • {p.node_a_id[:8]} ↔ {p.node_b_id[:8]}: 深度={p.depth:.4f}mm\n"
+
+            if contacts:
+                report += f"\n✓ 紧密接触: {len(contacts)} 个\n"
+
+            if not collisions:
+                report += "✓ 无碰撞，装配正常"
+
+            self.main_window.show_collision_result(report, collisions)
+            self.main_window.set_status("碰撞检测完成")
+
+        except Exception as e:
+            self.main_window.show_error("碰撞检测失败", f"检测失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    @Slot(str)
+    def validate_assembly(self, assembly_id: str):
+        """装配验证（综合分析）"""
+        try:
+            self.main_window.set_status("正在验证装配...")
+
+            # 加载节点
+            if not self.current_assembly_nodes:
+                nodes = self._load_assembly_nodes_for_analysis(assembly_id)
+            else:
+                nodes = self.current_assembly_nodes
+
+            if not nodes:
+                self.main_window.show_error("验证失败", "未找到装配节点")
+                return
+
+            # 执行验证
+            validation = self.collision_detector.validate_assembly(nodes)
+
+            # 显示结果
+            is_valid = validation['is_valid']
+            status_icon = "✓" if is_valid else "✗"
+
+            report = f"""装配验证报告
+
+{status_icon} 装配有效性: {'有效' if is_valid else '无效'}
+
+统计信息:
+• 总碰撞数: {validation['total_collisions']}
+• 干涉穿透: {validation['penetrations']}
+• 紧密接触: {validation['contacts']}
+• 间隙区域: {validation['clearances']}
+• 最大严重度: {validation['max_severity']:.2f}
+
+"""
+
+            if validation['collision_details']:
+                report += "碰撞详情:\n"
+                for detail in validation['collision_details'][:10]:
+                    report += f"• {detail['node_a']} ↔ {detail['node_b']}: "
+                    report += f"{detail['type']} (严重度={detail['severity']:.2f})\n"
+
+            self.main_window.show_validation_result(report, validation)
+            self.main_window.set_status("装配验证完成")
+
+        except Exception as e:
+            self.main_window.show_error("装配验证失败", f"验证失败: {e}")
+            import traceback
+            traceback.print_exc()
