@@ -5,3 +5,4 @@ matplotlib>=3.5.0
 mysql-connector-python==9.0.0
 neo4j==5.25.0
 python-dotenv==1.0.1
+scikit-learn>=1.0.0
