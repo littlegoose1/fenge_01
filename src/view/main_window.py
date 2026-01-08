@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QLabel,
                                QCheckBox, QDialog, QTextEdit, QDialogButtonBox)
 from PySide6.QtCore import Qt, Signal, Slot, QSize
 from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QDockWidget
 
 from OCC.Core.TopoDS import TopoDS_Shape
 from OCC.Display.backend import load_backend
@@ -18,7 +19,8 @@ from OCC.Display.qtDisplay import qtViewer3d
 
 from ..model.geometry import GeometricPrimitive
 from ..ui.solve_dialog import SolveAssemblyDialog
-
+from src.view.unity_launcher import UnityLauncherWidget
+from .equipment_panel import EquipmentPanel
 
 # ✅ 优化：验证结果对话框
 class ValidationResultDialog(QDialog):
@@ -50,6 +52,7 @@ class ValidationResultDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.Ok)
         buttons.accepted.connect(self.accept)
         layout.addWidget(buttons)
+
 
 
 class ParameterControlPanel(QWidget):
@@ -229,6 +232,8 @@ class MainWindow(QMainWindow):
 
         self.current_primitive_index = -1
         self.current_assembly_id = ""
+
+        self.setup_unity_launcher()
 
     def _create_menus(self):
         """✅ 优化后的菜单结构"""
@@ -784,3 +789,54 @@ class MainWindow(QMainWindow):
         """显示装配验证结果"""
         dlg = ValidationResultDialog("装配综合验证", report, self)
         dlg.exec()
+
+    def setup_unity_launcher(self):
+        """设置Unity启动器"""
+        self.unity_launcher = UnityLauncherWidget()
+
+        unity_dock = QDockWidget("人体展示", self)
+        unity_dock.setWidget(self.unity_launcher)
+        unity_dock.setAllowedAreas(Qt.RightDockWidgetArea)  # 只能在右侧
+
+        # ← 完全固定，不允许任何操作
+        unity_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
+
+        self.addDockWidget(Qt.RightDockWidgetArea, unity_dock)
+        # ← 添加装备面板
+        self.setup_equipment_panel()
+
+    def setup_equipment_panel(self):
+        """设置装备展示面板"""
+        self.equipment_panel = EquipmentPanel()
+
+        equipment_dock = QDockWidget("装备管理", self)
+        equipment_dock.setWidget(self.equipment_panel)
+        equipment_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+
+        # 设置特性：可移动，但不可关闭
+        features = QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable
+        equipment_dock.setFeatures(features)
+
+        # 添加到右侧，与Unity启动器并排（上下排列）
+        self.addDockWidget(Qt.RightDockWidgetArea, equipment_dock)
+
+        # 连接信号
+        self.equipment_panel.equipment_selected.connect(self.on_equipment_selected)
+        self.equipment_panel.equipment_loaded.connect(self.on_equipment_loaded)
+
+    def on_equipment_selected(self, equipment_id: str):
+        """装备被选中时的回调"""
+        print(f"装备已选中: {equipment_id}")
+        self.set_status(f"已选中装备: {equipment_id}")
+
+    def on_equipment_loaded(self, equipment_data: dict):
+        """装备加载时的回调"""
+        equipment_name = equipment_data.get('equipment_name', 'Unknown')
+        part_count = len(equipment_data.get('parts', []))
+
+        print(f"装备已加载: {equipment_name}, 包含 {part_count} 个部件")
+        self.set_status(f"已加载装备: {equipment_name}")
+
+        # 可以在这里将数据传递给Unity
+        # if hasattr(self, 'unity_launcher'):
+        #     self.unity_launcher.load_equipment_data(equipment_data)
