@@ -1,15 +1,18 @@
-from typing import List, Dict, Any,Optional
+from typing import List, Dict, Any, Optional
 import os
+from PySide6.QtGui import QFont, QColor
+from datetime import datetime
 
 from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QLabel,
                                QFileDialog, QSplitter,
                                QWidget, QTreeWidget, QTreeWidgetItem, QProgressBar,
                                QStatusBar, QMessageBox, QGroupBox, QFormLayout,
                                QDoubleSpinBox, QPushButton, QToolBar,
-                               QCheckBox, QDialog, QTextEdit, QDialogButtonBox)
+                               QCheckBox, QDialog, QTextEdit, QDialogButtonBox,
+                               QComboBox, QLineEdit, QRadioButton,
+                               QStyle, QDockWidget, QTableWidget, QTableWidgetItem, QHeaderView)
 from PySide6.QtCore import Qt, Signal, Slot, QSize
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QDockWidget
 
 from OCC.Core.TopoDS import TopoDS_Shape
 from OCC.Display.backend import load_backend
@@ -17,10 +20,11 @@ from OCC.Display.backend import load_backend
 load_backend("pyside6")
 from OCC.Display.qtDisplay import qtViewer3d
 
-from ..model.geometry import GeometricPrimitive
+from .. model.geometry import GeometricPrimitive
 from ..ui.solve_dialog import SolveAssemblyDialog
 from src.view.unity_launcher import UnityLauncherWidget
-from .equipment_panel import EquipmentPanel
+from . equipment_panel import EquipmentPanel
+
 
 # ✅ 优化：验证结果对话框
 class ValidationResultDialog(QDialog):
@@ -54,7 +58,6 @@ class ValidationResultDialog(QDialog):
         layout.addWidget(buttons)
 
 
-
 class ParameterControlPanel(QWidget):
     parameterChanged = Signal(dict)
     previewToggled = Signal(bool)
@@ -86,8 +89,8 @@ class ParameterControlPanel(QWidget):
 
         self.main_layout.addStretch(1)
 
-    def _on_preview_toggled(self, state: int):
-        self.previewToggled.emit(state == Qt.CheckState.Checked.value)
+    def _on_preview_toggled(self, state:  int):
+        self.previewToggled.emit(state == Qt.CheckState.Checked. value)
 
     def set_primitive(self, primitive: GeometricPrimitive):
         self._clear_form()
@@ -110,46 +113,46 @@ class ParameterControlPanel(QWidget):
         row = QHBoxLayout(w)
         row.setContentsMargins(0, 0, 0, 0)
 
-        x = QDoubleSpinBox();
-        x.setRange(-1e3, 1e3);
-        x.setDecimals(4);
+        x = QDoubleSpinBox()
+        x.setRange(-1e3, 1e3)
+        x.setDecimals(4)
         x.setValue(value[0])
-        y = QDoubleSpinBox();
-        y.setRange(-1e3, 1e3);
-        y.setDecimals(4);
+        y = QDoubleSpinBox()
+        y.setRange(-1e3, 1e3)
+        y.setDecimals(4)
         y.setValue(value[1])
-        z = QDoubleSpinBox();
-        z.setRange(-1e3, 1e3);
-        z.setDecimals(4);
+        z = QDoubleSpinBox()
+        z.setRange(-1e3, 1e3)
+        z.setDecimals(4)
         z.setValue(value[2])
-        row.addWidget(QLabel("X:"));
+        row.addWidget(QLabel("X:  "))
         row.addWidget(x)
-        row.addWidget(QLabel("Y:"));
+        row.addWidget(QLabel("Y: "))
         row.addWidget(y)
-        row.addWidget(QLabel("Z:"));
+        row.addWidget(QLabel("Z:"))
         row.addWidget(z)
-        self.form_layout.addRow(name.replace("_", " ").title(), w)
+        self.form_layout.addRow(name. replace("_", " ").title(), w)
         self.controls[name] = (x, y, z)
 
     def _add_numeric_control(self, name, value):
         s = QDoubleSpinBox()
         if name in ["radius", "height", "width", "major_radius", "minor_radius"]:
-            s.setRange(0.001, 1000);
+            s.setRange(0.001, 1000)
             s.setSingleStep(0.1)
         elif name in ["semi_angle"]:
-            s.setRange(0, 89);
-            s.setSingleStep(1);
+            s.setRange(0, 89)
+            s.setSingleStep(1)
             s.setSuffix("°")
         else:
-            s.setRange(-1000, 1000);
+            s.setRange(-1000, 1000)
             s.setSingleStep(0.1)
-        s.setDecimals(4);
+        s.setDecimals(4)
         s.setValue(value)
         self.form_layout.addRow(name.replace("_", " ").title(), s)
         self.controls[name] = s
 
     def _on_apply(self):
-        new_params = {"type": self.parameters.get("type", "")}
+        new_params = {"type": self.parameters. get("type", "")}
         for name, ctrl in self.controls.items():
             if isinstance(ctrl, tuple) and len(ctrl) == 3:
                 x, y, z = ctrl
@@ -167,7 +170,7 @@ class GeometryTreeWidget(QTreeWidget):
         self.setHeaderLabels(["几何体"])
         self.setIconSize(QSize(16, 16))
         self.itemSelectionChanged.connect(self._on_selection_changed)
-        self.primitives: List[GeometricPrimitive] = []
+        self.primitives:  List[GeometricPrimitive] = []
 
     def set_primitives(self, primitives: List[GeometricPrimitive]):
         self.primitives = primitives
@@ -176,13 +179,13 @@ class GeometryTreeWidget(QTreeWidget):
     def _update_tree(self):
         self.clear()
         for i, primitive in enumerate(self.primitives):
-            item = QTreeWidgetItem([f"{primitive.type.title()} #{i + 1}"])
+            item = QTreeWidgetItem([f"{primitive.type. title()} #{i + 1}"])
             details = QTreeWidgetItem([f"匹配度: {primitive.fitting_score:.2f}"])
             item.addChild(details)
             params = primitive.get_params()
             for name, value in params.items():
                 if name != "type":
-                    item.addChild(QTreeWidgetItem([f"{name.replace('_', ' ').title()}: {value}"]))
+                    item. addChild(QTreeWidgetItem([f"{name. replace('_', ' ').title()}: {value}"]))
             self.addTopLevelItem(item)
 
     def _on_selection_changed(self):
@@ -190,7 +193,7 @@ class GeometryTreeWidget(QTreeWidget):
         if not selected:
             return
         item = selected[0]
-        while item.parent():
+        while item. parent():
             item = item.parent()
         idx = self.indexOfTopLevelItem(item)
         if 0 <= idx < len(self.primitives):
@@ -198,6 +201,7 @@ class GeometryTreeWidget(QTreeWidget):
 
 
 class MainWindow(QMainWindow):
+    # 现有信号
     open_file_requested = Signal(str)
     save_file_requested = Signal(str)
     modify_primitive_requested = Signal(int, dict)
@@ -208,10 +212,20 @@ class MainWindow(QMainWindow):
     export_part_to_db_requested = Signal()
     import_assembly_requested = Signal(str)
 
-    # ✅ 3.3.2功能信号
+    # ✅ 3. 3.2功能信号
     analyze_topology_requested = Signal(str)
     check_collision_requested = Signal(str)
     validate_assembly_requested = Signal(str)
+
+    # ✅ SolidWorks BOM提取信号
+    extract_bom_from_solidworks_requested = Signal(str, str, str)
+    extract_bom_auto_requested = Signal(str, str, str)
+
+    # ✅ 装配管理信号
+    assembly_selected = Signal(str)
+    node_selected = Signal(str, str)
+    load_assembly_requested = Signal(str)
+    refresh_assemblies_requested = Signal()
 
     def __init__(self):
         super().__init__()
@@ -219,11 +233,11 @@ class MainWindow(QMainWindow):
         self.resize(1400, 900)
 
         self.preview_enabled = True
-        self.statusBar = QStatusBar();
+        self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
-        self.progressBar = QProgressBar();
+        self.progressBar = QProgressBar()
         self.progressBar.setMaximumWidth(200)
-        self.progressBar.setVisible(False);
+        self.progressBar.setVisible(False)
         self.statusBar.addPermanentWidget(self.progressBar)
 
         self._create_menus()
@@ -236,7 +250,7 @@ class MainWindow(QMainWindow):
         self.setup_unity_launcher()
 
     def _create_menus(self):
-        """✅ 优化后的菜单结构"""
+        """✅ 菜单结构（含SolidWorks BOM）"""
 
         # ========== 文件菜单 ==========
         file_menu = self.menuBar().addMenu("文件(&F)")
@@ -261,7 +275,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(exit_action)
 
         # ========== 编辑菜单 ==========
-        edit_menu = self.menuBar().addMenu("编辑(&E)")
+        edit_menu = self. menuBar().addMenu("编辑(&E)")
 
         undo_action = QAction("撤销", self)
         undo_action.setShortcut("Ctrl+Z")
@@ -301,31 +315,39 @@ class MainWindow(QMainWindow):
         database_menu.addAction(export_part_action)
         database_menu.addAction(import_assembly_action)
 
+        # ✅ SolidWorks BOM提取
+        database_menu.addSeparator()
+        extract_sw_bom_action = QAction("从SolidWorks提取BOM.. .", self)
+        extract_sw_bom_action.setShortcut("Ctrl+Alt+B")
+        extract_sw_bom_action.setStatusTip("从SolidWorks装配文件提取物料清单")
+        extract_sw_bom_action.triggered. connect(self._on_extract_bom_from_solidworks)
+        database_menu.addAction(extract_sw_bom_action)
+
         self._act_export_part = export_part_action
         self._act_import_assembly = import_assembly_action
 
-        # ========== ✅ 优化：装配与验证菜单（合并原装配和验证菜单）==========
+        # ========== ✅ 装配与验证菜单 ==========
         assembly_menu = self.menuBar().addMenu("装配与验证(&A)")
 
         # 约束求解
         solve_action = QAction("约束求解.. .", self)
         solve_action.setShortcut("Ctrl+Alt+S")
         solve_action.setStatusTip("根据装配约束求解各零件位姿")
-        solve_action.triggered.connect(self._on_solve_assembly)
+        solve_action. triggered.connect(self._on_solve_assembly)
         assembly_menu.addAction(solve_action)
 
         assembly_menu.addSeparator()
 
         # 拓扑分析
         topology_action = QAction("分析接触关系（拓扑）", self)
-        topology_action.setShortcut("Ctrl+T")
+        topology_action. setShortcut("Ctrl+T")
         topology_action.setStatusTip("分析零件之间的接触与邻接关系")
         topology_action.triggered.connect(self._on_analyze_topology)
         assembly_menu.addAction(topology_action)
 
         # 碰撞检测
         collision_action = QAction("检测碰撞干涉", self)
-        collision_action.setShortcut("Ctrl+K")
+        collision_action. setShortcut("Ctrl+K")
         collision_action.setStatusTip("检测零件之间的碰撞、穿透和间隙")
         collision_action.triggered.connect(self._on_check_collision)
         assembly_menu.addAction(collision_action)
@@ -335,26 +357,173 @@ class MainWindow(QMainWindow):
         # 综合验证
         validate_action = QAction("综合验证装配", self)
         validate_action.setShortcut("Ctrl+Shift+V")
-        validate_action.setStatusTip("执行完整的装配可行性验证（包含拓扑、碰撞等）")
-        validate_action.triggered.connect(self._on_validate_assembly)
+        validate_action.setStatusTip("执行完整的装配可行性验证（包含拓扑、碰撞��）")
+        validate_action. triggered.connect(self._on_validate_assembly)
         assembly_menu.addAction(validate_action)
 
         # ========== 帮助菜单 ==========
-        help_menu = self.menuBar().addMenu("帮助(&H)")
+        help_menu = self. menuBar().addMenu("帮助(&H)")
 
         about_action = QAction("关于", self)
-        about_action.triggered.connect(self._on_about)
+        about_action. triggered.connect(self._on_about)
         help_menu.addAction(about_action)
 
     def _on_import_assembly(self):
-        step_path, _ = QFileDialog.getOpenFileName(
-            self, "选择装配 STEP 文件", "", "STEP Files (*.step *.stp);;All Files (*.*)"
+        """导入装配对话框"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择装配文件",
+            "",
+            "装配文件 (*. SLDASM *.sldasm *.STEP *.step *.stp);;SolidWorks装配 (*. SLDASM *.sldasm);;STEP文件 (*. STEP *.step *.stp);;所有文件 (*.*)"
         )
-        if step_path:
-            self.import_assembly_requested.emit(step_path)
+
+        if file_path:
+            self.import_assembly_requested.emit(file_path)
+
+    def _on_extract_bom_from_solidworks(self):
+        """从SolidWorks提取BOM对话框（仅自动模式）"""
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("从SolidWorks提取BOM")
+        dialog.resize(500, 250)
+
+        layout = QVBoxLayout(dialog)
+
+        # 文件选择
+        file_group = QGroupBox("SolidWorks装配文件")
+        file_layout = QVBoxLayout()
+
+        sldasm_path_layout = QHBoxLayout()
+        sldasm_path_label = QLabel("文件:  (未选择)")
+        sldasm_path_label.setStyleSheet("color: #666; padding: 5px;")
+        sldasm_path_layout. addWidget(sldasm_path_label)
+        sldasm_path_layout.addStretch()
+
+        browse_btn = QPushButton("浏览...")
+        selected_sldasm_path = [""]
+
+        def on_browse():
+            path, _ = QFileDialog.getOpenFileName(
+                dialog,
+                "选择SolidWorks装配文件",
+                "",
+                "SolidWorks Assembly (*. SLDASM *.sldasm);;All Files (*.*)"
+            )
+            if path:
+                selected_sldasm_path[0] = path
+                sldasm_path_label.setText(f"文件: {os.path.basename(path)}")
+                sldasm_path_label.setStyleSheet("color: #000; padding: 5px;")
+
+        browse_btn.clicked.connect(on_browse)
+        sldasm_path_layout.addWidget(browse_btn)
+
+        file_layout.addLayout(sldasm_path_layout)
+        file_group.setLayout(file_layout)
+        layout.addWidget(file_group)
+
+        # 导出格式
+        options_group = QGroupBox("导出选项")
+        options_layout = QVBoxLayout()
+
+        options_layout.addWidget(QLabel("导出格式:"))
+        format_combo = QComboBox()
+        format_combo.addItems(["Excel (. xlsx)", "JSON (.json)", "CSV (.csv)"])
+        options_layout.addWidget(format_combo)
+
+        options_group. setLayout(options_layout)
+        layout.addWidget(options_group)
+
+        # 提示信息
+        info_label = QLabel(
+            "💡 使用说明:\n"
+            "• 自动启动SolidWorks并打开装配文件\n"
+            "• 自动提取BOM并导出\n"
+            "• 完成后自动关闭SolidWorks"
+        )
+        info_label.setStyleSheet("""
+            QLabel {
+                background-color: #E3F2FD;
+                padding: 10px;
+                border-radius: 5px;
+                color: #1976D2;
+            }
+        """)
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+        # 按钮
+        layout.addStretch()
+        button_layout = QHBoxLayout()
+
+        extract_btn = QPushButton("提取BOM")
+        extract_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color:  white;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+
+        cancel_btn = QPushButton("取消")
+
+        button_layout.addStretch()
+        button_layout. addWidget(extract_btn)
+        button_layout.addWidget(cancel_btn)
+        layout.addLayout(button_layout)
+
+        # 事件处理
+        def on_extract():
+            if not selected_sldasm_path[0]:
+                QMessageBox. warning(dialog, "未选择文件", "请先选择SolidWorks装配文件")
+                return
+
+            sldasm_path = selected_sldasm_path[0]
+            asm_basename = os.path.splitext(os.path.basename(sldasm_path))[0]
+            date_str = datetime.now().strftime('%Y%m%d')
+
+            # 确定格式和扩展名
+            format_text = format_combo.currentText()
+            if "Excel" in format_text:
+                format_type = "excel"
+                filter_str = "Excel Files (*.xlsx)"
+                default_ext = ".xlsx"
+            elif "JSON" in format_text:
+                format_type = "json"
+                filter_str = "JSON Files (*.json)"
+                default_ext = ".json"
+            else:
+                format_type = "csv"
+                filter_str = "CSV Files (*.csv)"
+                default_ext = ".csv"
+
+            default_filename = f"{asm_basename}_BOM_{date_str}{default_ext}"
+
+            output_path, _ = QFileDialog.getSaveFileName(
+                dialog,
+                "保存BOM文件",
+                default_filename,
+                filter_str
+            )
+
+            if output_path:
+                if not output_path.endswith(default_ext):
+                    output_path += default_ext
+
+                dialog.accept()
+                self.extract_bom_auto_requested.emit(sldasm_path, output_path, format_type)
+
+        extract_btn.clicked.connect(on_extract)
+        cancel_btn. clicked.connect(dialog.reject)
+
+        dialog.exec()
 
     def _create_toolbars(self):
-        """✅ 优化后的工具栏（删除重复项）"""
+        """✅ 工具栏"""
 
         # 主工具栏
         main_tb = QToolBar("主工具栏")
@@ -384,55 +553,59 @@ class MainWindow(QMainWindow):
         main_tb.addAction(a_undo)
         main_tb.addAction(a_redo)
 
-        # ✅ 装配验证工具栏（优化标签）
+        # ✅ 装配验证工具栏
         validate_tb = QToolBar("装配验证")
         validate_tb.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.addToolBar(validate_tb)
 
         a_topology = QAction("🔗 接触分析", self)
         a_topology.setStatusTip("分析零件之间的拓扑接触关系")
-        a_topology.triggered.connect(self._on_analyze_topology)
+        a_topology. triggered.connect(self._on_analyze_topology)
 
         a_collision = QAction("⚠️ 碰撞检测", self)
         a_collision.setStatusTip("检测装配干涉")
-        a_collision.triggered.connect(self._on_check_collision)
+        a_collision.triggered. connect(self._on_check_collision)
 
         a_validate = QAction("✓ 综合验证", self)
         a_validate.setStatusTip("完整装配验证")
-        a_validate.triggered.connect(self._on_validate_assembly)
+        a_validate. triggered.connect(self._on_validate_assembly)
 
         validate_tb.addAction(a_topology)
         validate_tb.addAction(a_collision)
         validate_tb.addAction(a_validate)
 
     def _create_layout(self):
-        central = QWidget();
+        central = QWidget()
         self.setCentralWidget(central)
         main_layout = QHBoxLayout(central)
-        splitter = QSplitter(Qt.Horizontal);
+        splitter = QSplitter(Qt.Horizontal)
         main_layout.addWidget(splitter)
 
-        left_panel = QWidget();
-        left_layout = QVBoxLayout(left_panel);
+        # 左侧面板：几何体列表 + 参数编辑
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        self.geometry_tree = GeometryTreeWidget();
+        self.geometry_tree = GeometryTreeWidget()
         self.geometry_tree.primitiveSelected.connect(self._on_primitive_selected)
-        left_layout.addWidget(QLabel("几何体列表"));
+        left_layout.addWidget(QLabel("几何体列表"))
         left_layout.addWidget(self.geometry_tree)
 
         self.param_panel = ParameterControlPanel()
         self.param_panel.parameterChanged.connect(self._on_parameter_changed)
         self.param_panel.previewToggled.connect(self._on_preview_toggled)
-        left_layout.addWidget(QLabel("参数编辑"));
+        left_layout.addWidget(QLabel("参数编辑"))
         left_layout.addWidget(self.param_panel)
         splitter.addWidget(left_panel)
 
-        self.view_panel = QWidget();
-        vbox = QVBoxLayout(self.view_panel);
+        # 中间面板：3D视图
+        self.view_panel = QWidget()
+        vbox = QVBoxLayout(self.view_panel)
         vbox.setContentsMargins(0, 0, 0, 0)
-        self.canvas = qtViewer3d(self.view_panel);
+        self.canvas = qtViewer3d(self.view_panel)
         vbox.addWidget(self.canvas)
         splitter.addWidget(self.view_panel)
+
+        # 两列布局
         splitter.setSizes([300, 1100])
 
         self.canvas.InitDriver()
@@ -440,24 +613,24 @@ class MainWindow(QMainWindow):
 
     def _init_view(self):
         from PySide6.QtWidgets import QApplication
-        self.canvas.qApp = QApplication.instance()
-        from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
+        self.canvas.qApp = QApplication. instance()
+        from OCC.Core. Quantity import Quantity_Color, Quantity_TOC_RGB
         from OCC.Core.Aspect import Aspect_GFM_VER
         top = Quantity_Color(210 / 255, 222 / 255, 236 / 255, Quantity_TOC_RGB)
         bottom = Quantity_Color(1.0, 1.0, 1.0, Quantity_TOC_RGB)
-        self.canvas._display.View.SetBgGradientColors(top, bottom, Aspect_GFM_VER)
-        self.canvas._display.View_Top();
-        self.canvas._display.View_Iso();
+        self.canvas._display. View. SetBgGradientColors(top, bottom, Aspect_GFM_VER)
+        self.canvas._display. View_Top()
+        self.canvas._display. View_Iso()
         self.canvas._display.FitAll()
 
-    def _on_preview_toggled(self, enabled: bool):
+    def _on_preview_toggled(self, enabled:  bool):
         self.preview_enabled = enabled
         if self.current_primitive_index >= 0:
             self.update_preview_requested.emit(self.current_primitive_index, enabled)
 
     @Slot(str)
     def set_status(self, message: str):
-        self.statusBar.showMessage(message)
+        self.statusBar. showMessage(message)
 
     @Slot(int)
     def set_progress(self, percent: int):
@@ -473,6 +646,21 @@ class MainWindow(QMainWindow):
     def show_info(self, title: str, message: str):
         QMessageBox.information(self, title, message)
 
+    def show_warning(self, title: str, message:  str):
+        """显示警告对话框"""
+        QMessageBox.warning(self, title, message)
+
+    def show_question(self, title: str, message: str) -> bool:
+        """显示确认对话框"""
+        reply = QMessageBox.question(
+            self,
+            title,
+            message,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        return reply == QMessageBox.Yes
+
     def set_primitives(self, primitives: List[GeometricPrimitive]):
         self.geometry_tree.set_primitives(primitives)
         self.canvas._display.EraseAll()
@@ -481,20 +669,20 @@ class MainWindow(QMainWindow):
                 self.canvas._display.DisplayShape(f, update=False)
         self.canvas._display.View_Iso()
         self.canvas._display.FitAll()
-        self.canvas._display.Repaint()
+        self.canvas._display. Repaint()
 
     def update_primitive(self, index: int, new_shape: TopoDS_Shape):
         if index < 0:
             return
         self.canvas._display.EraseAll()
-        primitives = self.geometry_tree.primitives
+        primitives = self.geometry_tree. primitives
         for i, p in enumerate(primitives):
             if i == index:
                 self.canvas._display.DisplayShape(new_shape, update=False, color="YELLOW")
             else:
                 for f in p.faces:
                     self.canvas._display.DisplayShape(f, update=False)
-        self.canvas._display.FitAll()
+        self.canvas._display. FitAll()
         self.canvas._display.Repaint()
 
     def show_original_with_preview(self, geometry_id: int, original_shape: TopoDS_Shape, preview_shape: TopoDS_Shape):
@@ -502,19 +690,19 @@ class MainWindow(QMainWindow):
             return
         try:
             self.canvas._display.EraseAll()
-            primitives = self.geometry_tree.primitives
+            primitives = self.geometry_tree. primitives
             for i, p in enumerate(primitives):
                 if i == geometry_id:
-                    self.canvas._display.DisplayShape(original_shape, update=False, color="BLUE")
+                    self.canvas._display. DisplayShape(original_shape, update=False, color="BLUE")
                     if preview_shape and self.preview_enabled:
                         from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
                         c = Quantity_Color(0.0, 0.8, 0.2, Quantity_TOC_RGB)
                         self.canvas._display.DisplayShape(preview_shape, color=c, transparency=0.7, update=False)
                 else:
-                    for f in p.faces:
+                    for f in p. faces:
                         self.canvas._display.DisplayShape(f, update=False)
             self.canvas._display.FitAll()
-            self.canvas._display.Repaint()
+            self.canvas._display. Repaint()
         except Exception as e:
             print(f"显示预览失败: {e}")
 
@@ -528,11 +716,11 @@ class MainWindow(QMainWindow):
         if path:
             if not path.lower().endswith((". step", ".stp")):
                 path += ".step"
-            self.save_file_requested.emit(path)
+            self.save_file_requested. emit(path)
 
     def _on_primitive_selected(self, index: int):
         self.current_primitive_index = index
-        primitives = self.geometry_tree.primitives
+        primitives = self.geometry_tree. primitives
         if 0 <= index < len(primitives):
             self.param_panel.set_primitive(primitives[index])
             self.canvas._display.EraseAll()
@@ -542,8 +730,8 @@ class MainWindow(QMainWindow):
                         self.canvas._display.DisplayShape(f, update=False, color="GREEN")
                 else:
                     for f in p.faces:
-                        self.canvas._display.DisplayShape(f, update=False)
-            self.canvas._display.Repaint()
+                        self.canvas._display. DisplayShape(f, update=False)
+            self.canvas._display. Repaint()
 
     def _on_parameter_changed(self, parameters: Dict[str, Any]):
         if self.current_primitive_index >= 0:
@@ -553,7 +741,7 @@ class MainWindow(QMainWindow):
 
     def _on_undo(self):
         if self.current_primitive_index >= 0:
-            self.undo_requested.emit(self.current_primitive_index)
+            self. undo_requested.emit(self. current_primitive_index)
 
     def _on_redo(self):
         if self.current_primitive_index >= 0:
@@ -567,16 +755,17 @@ class MainWindow(QMainWindow):
         """✅ 更新关于对话框"""
         about_text = """
 <h2>单兵装备数字化设计系统</h2>
-<p><b>版本:</b> 2.0</p>
+<p><b>版本: </b> 2.1</p>
 <p><b>开发者:</b> littlegoose1</p>
 <br>
 <p><b>核心功能:</b></p>
 <ul>
   <li>几何体自动分割与参数化</li>
   <li>装配拓扑邻接分析（3. 3. 2）</li>
-  <li>碰撞检测与干涉验证（3.3.2）</li>
+  <li>碰撞检���与干涉验证（3.3.2）</li>
   <li>协同几何变形（3.3.2）</li>
   <li>约束求解与装配优化</li>
+  <li>从SolidWorks提取BOM</li>
 </ul>
 <br>
 <p><i>基于 PythonOCC、PySide6 和 OpenCASCADE</i></p>
@@ -588,7 +777,7 @@ class MainWindow(QMainWindow):
         try:
             accepted = QDialog.DialogCode.Accepted
         except AttributeError:
-            accepted = QDialog.Accepted
+            accepted = QDialog. Accepted
         if dlg.exec() != accepted:
             return
         asm_id, iterations = dlg.values()
@@ -596,15 +785,12 @@ class MainWindow(QMainWindow):
         self.solve_assembly_requested.emit(asm_id or "", iterations)
 
     def _on_export_part_to_db(self):
-        self.export_part_to_db_requested.emit()
+        self. export_part_to_db_requested.emit()
 
-    # ✅ 3.3.2功能槽函数
+    # ✅ 3. 3.2功能槽函数
 
     def _get_assembly_id(self) -> Optional[str]:
-        """获取装配ID（从用户输入或缓存）"""
-        from PySide6.QtWidgets import QInputDialog, QComboBox
-
-        # 如果有缓存的装配ID，询问是否使用
+        """获取装配ID（从用户输入或缓��）"""
         if self.current_assembly_id:
             reply = QMessageBox.question(
                 self,
@@ -614,94 +800,83 @@ class MainWindow(QMainWindow):
                 "• 点击 Yes 使用当前装配\n"
                 "• 点击 No 选择其他装配\n"
                 "• 点击 Cancel 取消操作",
-                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+                QMessageBox. Yes | QMessageBox.No | QMessageBox.Cancel,
                 QMessageBox.Yes
             )
 
-            if reply == QMessageBox.Cancel:
+            if reply == QMessageBox. Cancel:
                 return None
             elif reply == QMessageBox.Yes:
                 return self.current_assembly_id
 
-        # ✅ 改进的输入对话框
         dialog = QDialog(self)
         dialog.setWindowTitle("选择装配")
         dialog.resize(500, 200)
 
         layout = QVBoxLayout(dialog)
 
-        # 说明文字
         label = QLabel(
             "<b>请选择要分析的装配：</b><br><br>"
             "• 留空使用<b>最新</b>导入的装配<br>"
-            "• 或输入完整的UUID（格式: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx）"
+            "• 或输入完整的UUID（格式:  xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx）"
         )
         label.setWordWrap(True)
         layout.addWidget(label)
 
-        # 输入框
-        from PySide6.QtWidgets import QLineEdit
         input_field = QLineEdit()
         input_field.setPlaceholderText("留空使用最新装配，或输入UUID...")
         if self.current_assembly_id:
             input_field.setText(self.current_assembly_id)
         layout.addWidget(input_field)
 
-        # ✅ 添加"查看可用装配"按钮
         list_button = QPushButton("📋 查看可用装配列表")
-        list_button.clicked.connect(lambda: self._show_assemblies_list(input_field))
+        list_button. clicked.connect(lambda: self._show_assemblies_list(input_field))
         layout.addWidget(list_button)
 
-        # 按钮
-        from PySide6.QtWidgets import QDialogButtonBox
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
 
         if dialog.exec() == QDialog.Accepted:
-            asm_id = input_field.text().strip()
+            asm_id = input_field. text().strip()
             self.current_assembly_id = asm_id
-            return asm_id  # 可以是空字符串（表示最新）
+            return asm_id
 
         return None
 
-    # ✅ 新增：显示可用装配列表
     def _show_assemblies_list(self, input_field):
         """显示数据库中的装配列表供用户选择"""
         try:
-            from ..db.mysql import get_conn
+            from .. db.mysql import get_conn
             from ..db.util import bin_to_uuid
 
             sql = """
-                  SELECT id, \
-                         name, \
+                  SELECT id,
+                         name,
                          created_at,
                          (SELECT COUNT(*) FROM assembly_nodes WHERE assembly_id = assemblies.id) as node_count
                   FROM assemblies
-                  ORDER BY created_at DESC LIMIT 20 \
+                  ORDER BY created_at DESC LIMIT 20
                   """
 
             conn = get_conn()
             cur = conn.cursor(dictionary=True)
             try:
                 cur.execute(sql)
-                assemblies = cur.fetchall()
+                assemblies = cur. fetchall()
 
                 if not assemblies:
                     QMessageBox.information(self, "无装配",
                                             "数据库中没有装配记录\n\n请先导入装配（数据库 → 导入装配并入库）")
                     return
 
-                # 创建选择对话框
                 dialog = QDialog(self)
                 dialog.setWindowTitle("可用装配列表")
                 dialog.resize(700, 400)
 
                 layout = QVBoxLayout(dialog)
 
-                # 列表
-                from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
                 table = QTableWidget()
                 table.setColumnCount(4)
                 table.setHorizontalHeaderLabels(["装配名称", "节点数", "创建时间", "UUID"])
@@ -711,8 +886,8 @@ class MainWindow(QMainWindow):
 
                 for i, asm in enumerate(assemblies):
                     asm_id = bin_to_uuid(asm['id'])
-                    table.setItem(i, 0, QTableWidgetItem(asm.get('name', 'Unnamed')))
-                    table.setItem(i, 1, QTableWidgetItem(str(asm.get('node_count', 0))))
+                    table.setItem(i, 0, QTableWidgetItem(asm. get('name', 'Unnamed')))
+                    table. setItem(i, 1, QTableWidgetItem(str(asm. get('node_count', 0))))
                     table.setItem(i, 2, QTableWidgetItem(str(asm.get('created_at', ''))))
                     table.setItem(i, 3, QTableWidgetItem(asm_id))
 
@@ -723,7 +898,6 @@ class MainWindow(QMainWindow):
 
                 layout.addWidget(table)
 
-                # 双击选择
                 def on_double_click(row, col):
                     asm_id = table.item(row, 3).text()
                     input_field.setText(asm_id)
@@ -731,18 +905,17 @@ class MainWindow(QMainWindow):
 
                 table.cellDoubleClicked.connect(on_double_click)
 
-                # 按钮
                 button_layout = QHBoxLayout()
                 select_btn = QPushButton("选择")
-                select_btn.clicked.connect(lambda: (
+                select_btn. clicked.connect(lambda: (
                     input_field.setText(table.item(table.currentRow(), 3).text()) if table.currentRow() >= 0 else None,
                     dialog.accept()
                 ))
                 cancel_btn = QPushButton("取消")
-                cancel_btn.clicked.connect(dialog.reject)
+                cancel_btn. clicked.connect(dialog.reject)
 
                 button_layout.addStretch()
-                button_layout.addWidget(select_btn)
+                button_layout. addWidget(select_btn)
                 button_layout.addWidget(cancel_btn)
                 layout.addLayout(button_layout)
 
@@ -773,9 +946,7 @@ class MainWindow(QMainWindow):
         if asm_id is not None:
             self.validate_assembly_requested.emit(asm_id)
 
-    # ✅ 显示验证结果的方法
-
-    def show_topology_result(self, report: str, adjacency: Any):
+    def show_topology_result(self, report:  str, adjacency:  Any):
         """显示拓扑分析结果"""
         dlg = ValidationResultDialog("拓扑接触关系分析", report, self)
         dlg.exec()
@@ -796,13 +967,10 @@ class MainWindow(QMainWindow):
 
         unity_dock = QDockWidget("人体展示", self)
         unity_dock.setWidget(self.unity_launcher)
-        unity_dock.setAllowedAreas(Qt.RightDockWidgetArea)  # 只能在右侧
-
-        # ← 完全固定，不允许任何操作
+        unity_dock.setAllowedAreas(Qt.RightDockWidgetArea)
         unity_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
 
         self.addDockWidget(Qt.RightDockWidgetArea, unity_dock)
-        # ← 添加装备面板
         self.setup_equipment_panel()
 
     def setup_equipment_panel(self):
@@ -811,22 +979,29 @@ class MainWindow(QMainWindow):
 
         equipment_dock = QDockWidget("装备管理", self)
         equipment_dock.setWidget(self.equipment_panel)
-        equipment_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        equipment_dock.setAllowedAreas(Qt. LeftDockWidgetArea | Qt.RightDockWidgetArea)
 
-        # 设置特性：可移动，但不可关闭
-        features = QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable
+        features = QDockWidget. DockWidgetMovable | QDockWidget.DockWidgetFloatable
         equipment_dock.setFeatures(features)
 
-        # 添加到右侧，与Unity启动器并排（上下排列）
         self.addDockWidget(Qt.RightDockWidgetArea, equipment_dock)
 
-        # 连接信号
-        self.equipment_panel.equipment_selected.connect(self.on_equipment_selected)
+        # 连接原有信号
+        self.equipment_panel.equipment_selected.connect(self. on_equipment_selected)
         self.equipment_panel.equipment_loaded.connect(self.on_equipment_loaded)
+
+        # ✅ 连接装配管理新信号
+        self.equipment_panel.assembly_selected.connect(self._on_assembly_selected_from_panel)
+        self.equipment_panel.node_selected.connect(self._on_node_selected_from_panel)
+        self.equipment_panel.load_assembly_requested.connect(self._on_load_assembly_from_panel)
+
+        # ✅ 添加刷新信号连接
+        self.equipment_panel.refresh_assemblies_requested.connect(self._on_refresh_assemblies_from_panel)
+
 
     def on_equipment_selected(self, equipment_id: str):
         """装备被选中时的回调"""
-        print(f"装备已选中: {equipment_id}")
+        print(f"装备已选中:  {equipment_id}")
         self.set_status(f"已选中装备: {equipment_id}")
 
     def on_equipment_loaded(self, equipment_data: dict):
@@ -837,6 +1012,32 @@ class MainWindow(QMainWindow):
         print(f"装备已加载: {equipment_name}, 包含 {part_count} 个部件")
         self.set_status(f"已加载装备: {equipment_name}")
 
-        # 可以在这里将数据传递给Unity
-        # if hasattr(self, 'unity_launcher'):
-        #     self.unity_launcher.load_equipment_data(equipment_data)
+    # ✅ ========== 装配管理信号转发方法 ==========
+
+    def _on_assembly_selected_from_panel(self, assembly_id:  str):
+        """装备面板选中装配时转发信号"""
+        self.assembly_selected. emit(assembly_id)
+
+    def _on_node_selected_from_panel(self, assembly_id: str, node_id: str):
+        """装备面板选中节点时转发信号"""
+        self. node_selected.emit(assembly_id, node_id)
+
+    def _on_load_assembly_from_panel(self, assembly_id: str):
+        """装备面板加载装配时转发信号"""
+        self.load_assembly_requested.emit(assembly_id)
+
+    # ✅ ========== 装配数据填充方法（转发到装备面板）==========
+
+    def populate_assembly_tree(self, assemblies: List[Dict[str, Any]]):
+        """填充装配树（转发到装备面板）"""
+        if hasattr(self, 'equipment_panel'):
+            self.equipment_panel. populate_assembly_tree(assemblies)
+
+    def populate_assembly_nodes(self, assembly_id: str, nodes: List[Dict[str, Any]]):
+        """填充装配节点（转发到装备面板）"""
+        if hasattr(self, 'equipment_panel'):
+            self.equipment_panel.populate_assembly_nodes(assembly_id, nodes)
+
+    def _on_refresh_assemblies_from_panel(self):
+        """装备面板请求刷新时转发信号"""
+        self.refresh_assemblies_requested.emit()

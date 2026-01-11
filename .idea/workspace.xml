@@ -4,17 +4,16 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="3bc9585e-2f83-4858-b9c1-31eb8dede24b" name="更改" comment="1">
-      <change afterPath="$PROJECT_DIR$/scripts/demo_cooperative_deformation.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/assembly/collision_detector.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/assembly/cooperative_deformation.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/assembly/enhanced_assembly_slover.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/assembly/topology_analyzer.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.env" beforeDir="false" afterPath="$PROJECT_DIR$/.env" afterDir="false" />
+    <list default="true" id="3bc9585e-2f83-4858-b9c1-31eb8dede24b" name="更改" comment="人体装配">
+      <change afterPath="$PROJECT_DIR$/src/services/assembly_viewer_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/services/part_visualizer.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/services/solidworks_bom_extractor_auto.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/services/solidworks_bom_extractor_official.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/services/step_bom_extractor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/controller/app_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/controller/app_controller.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/db/mysql_repo.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/db/mysql_repo.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/view/equipment_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/view/equipment_panel.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/view/main_window.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/view/main_window.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -84,6 +83,7 @@
     &quot;Python.project_to_neo4j.executor&quot;: &quot;Run&quot;,
     &quot;Python.solve_assembly.executor&quot;: &quot;Run&quot;,
     &quot;Python.test_import.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_solidworks_connection.executor&quot;: &quot;Run&quot;,
     &quot;Python.text_xcaf_minimal.executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
@@ -175,29 +175,6 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="solve_assembly" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
-      <module name="cad_geometry_editor" />
-      <option name="ENV_FILES" value="" />
-      <option name="INTERPRETER_OPTIONS" value="" />
-      <option name="PARENT_ENVS" value="true" />
-      <envs>
-        <env name="PYTHONUNBUFFERED" value="1" />
-      </envs>
-      <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/scripts" />
-      <option name="IS_MODULE_SDK" value="true" />
-      <option name="ADD_CONTENT_ROOTS" value="true" />
-      <option name="ADD_SOURCE_ROOTS" value="true" />
-      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/scripts/solve_assembly.py" />
-      <option name="PARAMETERS" value="" />
-      <option name="SHOW_COMMAND_LINE" value="false" />
-      <option name="EMULATE_TERMINAL" value="false" />
-      <option name="MODULE_MODE" value="false" />
-      <option name="REDIRECT_INPUT" value="false" />
-      <option name="INPUT_FILE" value="" />
-      <method v="2" />
-    </configuration>
     <configuration name="test_import" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="cad_geometry_editor" />
       <option name="ENV_FILES" value="" />
@@ -213,6 +190,29 @@
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/test_import.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="test_solidworks_connection" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="cad_geometry_editor" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/scripts" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/scripts/test_solidworks_connection.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -246,11 +246,11 @@
     </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.test_solidworks_connection" />
         <item itemvalue="Python.demo_cooperative_deformation" />
         <item itemvalue="Python.text_xcaf_minimal" />
         <item itemvalue="Python.test_import" />
         <item itemvalue="Python.main_window" />
-        <item itemvalue="Python.solve_assembly" />
       </list>
     </recent_temporary>
   </component>
@@ -329,7 +329,18 @@
       <workItem from="1764819389095" duration="1418000" />
       <workItem from="1764820832292" duration="1645000" />
       <workItem from="1764829373478" duration="5573000" />
-      <workItem from="1764835834645" duration="1260000" />
+      <workItem from="1764835834645" duration="4354000" />
+      <workItem from="1765074567995" duration="410000" />
+      <workItem from="1765262995330" duration="1247000" />
+      <workItem from="1765681521265" duration="860000" />
+      <workItem from="1766130082520" duration="1319000" />
+      <workItem from="1766291658975" duration="1208000" />
+      <workItem from="1766884637088" duration="842000" />
+      <workItem from="1767582206329" duration="915000" />
+      <workItem from="1767871287913" duration="4706000" />
+      <workItem from="1767876419014" duration="13977000" />
+      <workItem from="1767934470951" duration="4088000" />
+      <workItem from="1768097992242" duration="4246000" />
     </task>
     <task id="LOCAL-00001" summary="1">
       <option name="closed" value="true" />
@@ -411,7 +422,23 @@
       <option name="project" value="LOCAL" />
       <updated>1762611182640</updated>
     </task>
-    <option name="localTasksCounter" value="11" />
+    <task id="LOCAL-00011" summary="拓扑分析，碰撞检测">
+      <option name="closed" value="true" />
+      <created>1764837277459</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1764837277459</updated>
+    </task>
+    <task id="LOCAL-00012" summary="人体装配">
+      <option name="closed" value="true" />
+      <created>1767871363111</created>
+      <option name="number" value="00012" />
+      <option name="presentableId" value="LOCAL-00012" />
+      <option name="project" value="LOCAL" />
+      <updated>1767871363111</updated>
+    </task>
+    <option name="localTasksCounter" value="13" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -430,12 +457,12 @@
             <list>
               <RecentGroup>
                 <option name="FILTER_VALUES">
-                  <option value="origin/main" />
+                  <option value="main" />
                 </option>
               </RecentGroup>
               <RecentGroup>
                 <option name="FILTER_VALUES">
-                  <option value="main" />
+                  <option value="origin/main" />
                 </option>
               </RecentGroup>
               <RecentGroup>
@@ -488,7 +515,7 @@
                   <entry key="branch">
                     <value>
                       <list>
-                        <option value="origin/main" />
+                        <option value="main" />
                       </list>
                     </value>
                   </entry>
@@ -505,7 +532,9 @@
     <MESSAGE value="Add initial project files and implement STEP file handling features" />
     <MESSAGE value="2" />
     <MESSAGE value="1" />
-    <option name="LAST_COMMIT_MESSAGE" value="1" />
+    <MESSAGE value="拓扑分析，碰撞检测" />
+    <MESSAGE value="人体装配" />
+    <option name="LAST_COMMIT_MESSAGE" value="人体装配" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -519,6 +548,7 @@
     </breakpoint-manager>
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
+    <SUITE FILE_PATH="coverage/cad_geometry_editor$test_solidworks_connection.coverage" NAME="test_solidworks_connection 覆盖结果" MODIFIED="1767878241458" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/config$main.coverage" NAME="main 覆盖结果" MODIFIED="1758713445188" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/cad_geometry_editor$test_import.coverage" NAME="test_import 覆盖结果" MODIFIED="1762597279201" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/cad_geometry_editor$occ_viewer.coverage" NAME="occ_viewer 覆盖结果" MODIFIED="1749021792141" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/src/view" />
@@ -532,6 +562,6 @@
     <SUITE FILE_PATH="coverage/cad_geometry_editor$dbtest.coverage" NAME="dbtest 覆盖结果" MODIFIED="1761209393531" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/cad_geometry_editor$text_xcaf_minimal.coverage" NAME="text_xcaf_minimal 覆盖结果" MODIFIED="1762604637657" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/cad_geometry_editor$outbox_worker.coverage" NAME="outbox_worker 覆盖结果" MODIFIED="1761375965053" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
-    <SUITE FILE_PATH="coverage/cad_geometry_editor$main.coverage" NAME="main 覆盖结果" MODIFIED="1764836841619" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/cad_geometry_editor$main.coverage" NAME="main 覆盖结果" MODIFIED="1768102128805" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
   </component>
 </project>

@@ -1,24 +1,34 @@
 from typing import List, Dict, Any, Optional
 import os
 
-from PySide6.QtCore import QObject, Slot
+from PySide6.QtCore import QObject, Slot, QTimer
+from PySide6.QtWidgets import QMessageBox, QInputDialog
 
 from OCC.Core.TopoDS import TopoDS_Compound
 from OCC.Core.BRep import BRep_Builder
 
-from ..model.geometry import GeometricPrimitive
+from .. model.geometry import GeometricPrimitive
 from ..model.io import StepFileHandler
 from ..model.segmentation import GeometrySegmentationProcessor
 from ..view.main_window import MainWindow
 
-from ..services.solver_service import SolveAssemblyWorker
+from .. services.solver_service import SolveAssemblyWorker
 from ..services.assembly_import_service import AssemblyImportService
 from ..db.persistence_service import PersistenceService
 
-# ✅ 新增：导入3.3.2模块
-from ..assembly.topology_analyzer import TopologyAnalyzer, AdjacencyMatrix
+# ✅ 导入3. 3. 2模块
+from ..assembly. topology_analyzer import TopologyAnalyzer, AdjacencyMatrix
 from ..assembly.collision_detector import CollisionDetector
 from ..assembly.cooperative_deformation import CooperativeDeformationEngine, DeformationConstraint
+
+# ✅ 导入官方API版本的SolidWorks BOM提取器
+from ..services.solidworks_bom_extractor_auto import SolidWorksBOMExtractorAuto
+
+from .. services.assembly_import_service_bom import AssemblyImportServiceBOM
+
+# ✅ 导入装配查看和可视化服务
+from ..services.assembly_viewer_service import AssemblyViewerService
+from ..services.part_visualizer import PartVisualizer
 
 
 class ApplicationController(QObject):
@@ -28,7 +38,9 @@ class ApplicationController(QObject):
     - 打开/保存、参数修改与预览、撤销/重做
     - 导出当前零部件到数据库
     - 装配求解（后台线程）
-    - ✅ 新增：拓扑邻接分析、碰撞检测、协同变形（3.3.2）
+    - ✅ 拓扑邻接分析、碰撞检测、协同变形（3.3.2）
+    - ✅ 从SolidWorks提取BOM（官方API方法）
+    - ✅ 装配查看和可视化
     """
 
     def __init__(self, main_window: MainWindow):
@@ -53,16 +65,17 @@ class ApplicationController(QObject):
         # 服务
         self.persistence = PersistenceService()
         self.assembly_importer = AssemblyImportService()
+        self.assembly_importer_bom = AssemblyImportServiceBOM()
 
         # 后台 workers
         self._workers: list[SolveAssemblyWorker] = []
 
-        # ✅ 新增：3.3.2模块
+        # ✅ 3.3.2模块
         self.topology_analyzer = TopologyAnalyzer(contact_threshold=0.1, angle_threshold=5.0)
         self.collision_detector = CollisionDetector(
             penetration_threshold=-0.01,
-            contact_threshold = 0.1,
-            clearance_threshold = 1.0
+            contact_threshold=0.1,
+            clearance_threshold=1.0
         )
         self.deformation_engine = CooperativeDeformationEngine(
             stiffness=1.0,
@@ -71,28 +84,48 @@ class ApplicationController(QObject):
         )
 
         # ✅ 缓存装配分析结果
-        self.current_adjacency: Optional[AdjacencyMatrix] = None
+        self.current_adjacency:  Optional[AdjacencyMatrix] = None
         self.current_assembly_nodes: List[Dict[str, Any]] = []
 
+        # ✅ 装配查看和可视化服务
+        self.assembly_viewer = AssemblyViewerService()
+        self.part_visualizer = PartVisualizer(main_window. canvas._display)
+
+        # ✅ 装配查看状态
+        self.current_assembly_id: Optional[str] = None
+        self.current_displayed_nodes: List[Dict[str, Any]] = []
+
         # 处理器回调接入 UI
-        self.processor.set_status_callback(self.main_window.set_status)
+        self.processor. set_status_callback(self. main_window.set_status)
         self.processor.set_progress_callback(self.main_window.set_progress)
 
-        # 信号连接
+        # ========== 现有信号连接 ==========
         self.main_window.open_file_requested.connect(self.open_file)
         self.main_window.save_file_requested.connect(self.save_file)
         self.main_window.modify_primitive_requested.connect(self.modify_primitive)
         self.main_window.update_preview_requested.connect(self.update_preview)
-        self.main_window.undo_requested.connect(self.undo_modification)
+        self.main_window. undo_requested.connect(self. undo_modification)
         self.main_window.redo_requested.connect(self.redo_modification)
         self.main_window.solve_assembly_requested.connect(self.solve_assembly)
         self.main_window.export_part_to_db_requested.connect(self.export_part_to_db)
         self.main_window.import_assembly_requested.connect(self.import_and_store_assembly)
 
-        # ✅ 新增：连接3.3.2功能信号
+        # ✅ 连接3.3.2功能信号
         self.main_window.analyze_topology_requested.connect(self.analyze_topology)
         self.main_window.check_collision_requested.connect(self.check_collision)
         self.main_window.validate_assembly_requested.connect(self.validate_assembly)
+
+        # ✅ 连接SolidWorks BOM提取信号
+        self.main_window.extract_bom_auto_requested.connect(self.extract_bom_auto)
+
+        # ✅ 连接装配查看和可视化信号
+        self.main_window.refresh_assemblies_requested.connect(self. refresh_assemblies)
+        self.main_window.load_assembly_requested.connect(self.load_assembly)
+        self.main_window.assembly_selected. connect(self.on_assembly_selected)
+        self.main_window.node_selected.connect(self.on_node_selected)
+
+        # ✅ 启动后延迟加载装配列表
+        QTimer.singleShot(500, self.refresh_assemblies)
 
     # ---------------- 文件打开/保存 ----------------
     @Slot(str)
@@ -102,9 +135,9 @@ class ApplicationController(QObject):
             self.main_window.set_status(f"正在加载文件: {file_path}")
 
             shape = self.io_handler.load_step_model(file_path)
-            self.primitives = self.processor.process_shape(shape)
+            self.primitives = self.processor. process_shape(shape)
 
-            self.modified_shapes.clear()
+            self.modified_shapes. clear()
             self.preview_shapes.clear()
 
             self.main_window.set_primitives(self.primitives)
@@ -123,7 +156,7 @@ class ApplicationController(QObject):
                 self.main_window.show_info("保存成功", f"模型已保存到: {file_path}")
                 self.main_window.set_status(f"保存成功: {file_path}")
             else:
-                self.main_window.show_error("保存失败", "无法保存文件，请检查路径和权限")
+                self.main_window.show_error("保存失败", "无法保存文件，请检查路径和��限")
                 self.main_window.set_status("保存失败")
         except Exception as e:
             self.main_window.show_error("保存失败", f"保存文件时出错: {e}")
@@ -139,7 +172,7 @@ class ApplicationController(QObject):
             show_preview = bool(parameters.pop("show_preview", True))
 
             if hasattr(primitive, "has_significant_changes"):
-                if not primitive.has_significant_changes(primitive.get_params(), parameters):
+                if not primitive.has_significant_changes(primitive. get_params(), parameters):
                     self.main_window.show_info("无变化", "参数没有实质性变化，无需更新")
                     return
 
@@ -164,7 +197,7 @@ class ApplicationController(QObject):
             self.modified_shapes[index] = new_shape
 
             if show_preview and preview_shape:
-                self.main_window.show_original_with_preview(index, new_shape, preview_shape)
+                self. main_window.show_original_with_preview(index, new_shape, preview_shape)
             else:
                 self.main_window.update_primitive(index, new_shape)
 
@@ -182,14 +215,14 @@ class ApplicationController(QObject):
             preview_shape = None
             if show_preview:
                 if index in self.preview_shapes:
-                    preview_shape = self.preview_shapes[index]
+                    preview_shape = self. preview_shapes[index]
                 elif hasattr(primitive, "create_preview_shape"):
                     try:
                         preview_shape = primitive.create_preview_shape(primitive.get_params())
                         if preview_shape:
                             self.preview_shapes[index] = preview_shape
                     except Exception as e:
-                        print(f"[preview] 创建预览形状失败: {e}")
+                        print(f"[preview] 创建预览形状失败:  {e}")
 
             if show_preview and preview_shape:
                 self.main_window.show_original_with_preview(index, current_shape, preview_shape)
@@ -199,7 +232,7 @@ class ApplicationController(QObject):
             print(f"[preview] 更新预览失败: {e}")
 
     @Slot(int)
-    def undo_modification(self, index: int):
+    def undo_modification(self, index:  int):
         if not (0 <= index < len(self.primitives)):
             return
         primitive = self.primitives[index]
@@ -209,7 +242,7 @@ class ApplicationController(QObject):
             else:
                 new_shape = None
             if new_shape:
-                self.modified_shapes[index] = new_shape
+                self. modified_shapes[index] = new_shape
                 if index in self.preview_shapes:
                     del self.preview_shapes[index]
                 self.main_window.update_primitive(index, new_shape)
@@ -224,11 +257,11 @@ class ApplicationController(QObject):
         primitive = self.primitives[index]
         try:
             if hasattr(primitive, "redo"):
-                new_shape = primitive.redo()
+                new_shape = primitive. redo()
             else:
                 new_shape = None
             if new_shape:
-                self.modified_shapes[index] = new_shape
+                self. modified_shapes[index] = new_shape
                 if index in self.preview_shapes:
                     del self.preview_shapes[index]
                 self.main_window.update_primitive(index, new_shape)
@@ -265,7 +298,7 @@ class ApplicationController(QObject):
             part_key = base
             part_name = base
 
-            params_snapshot: Dict[str, Any] = {
+            params_snapshot:  Dict[str, Any] = {
                 "primitives": [
                     {
                         "index": i,
@@ -288,7 +321,7 @@ class ApplicationController(QObject):
                 category=None,
                 tags=list({prim.type for prim in self.primitives}),
                 description=f"Generated from {self.current_file_path}",
-                meta_asset={"source": "gui", "file": self.current_file_path or ""},
+                meta_asset={"source": "gui", "file":  self.current_file_path or ""},
                 meta_version={"ui": "pyside6"},
             )
 
@@ -300,40 +333,95 @@ class ApplicationController(QObject):
         except Exception as e:
             self.main_window.show_error("导出失败", f"保存零部件到数据库失败：{e}")
 
-    # ---------------- 导入（flat-split canonical）并入库 ----------------
+    # ---------------- 导入并入库 ----------------
     @Slot(str)
     def import_and_store_assembly(self, step_path: str):
+        """导入装配并入库（智能选择导入方式）"""
         try:
-            self.main_window.set_status(f"开始导入：{step_path}")
-            result = self.assembly_importer.import_step_assembly(step_path)
+            file_ext = os.path.splitext(step_path)[1].lower()
+
+            # 检查文件类型
+            if file_ext not in ['.sldasm', '. step', '.stp']:
+                self.main_window.show_error(
+                    "不支持的文件",
+                    f"请选择 . SLDASM 或 . STEP 文件\n当前文件: {file_ext}"
+                )
+                return
+
+            self.main_window.set_status(f"开始导入:  {os.path.basename(step_path)}")
+
+            # ✅ 根据文件类型选择导入方式
+            if file_ext == '.sldasm':
+                # SolidWorks装配 - 使用BOM导入
+                result = self._import_solidworks_assembly_bom(step_path)
+            else:
+                # STEP文件 - 使用原有的几何分析方法
+                result = self.assembly_importer.import_step_assembly(step_path)
+
             asm_id = result["assembly_id"]
-            node_count = len(result["nodes"])
-            mode = result.get("mode", "flat-split-canonical")
+            node_count = len(result.get("nodes", []))
+            mode = result.get("mode", result.get("import_mode", "unknown"))
 
             self.main_window.show_info(
                 "导入完成",
-                f"模式: {mode}\n装配ID: {asm_id}\n零部件数: {node_count}"
+                f"✅ 导入成功！\n\n"
+                f"模式: {mode}\n"
+                f"装配ID: {asm_id[:8]}...\n"
+                f"零件种类: {result.get('total_parts', 'N/A')}\n"
+                f"装配节点: {node_count}"
             )
+
             self.main_window.set_status(f"导入完成（{mode}，节点: {node_count}）")
 
-            for n in result["nodes"][:10]:
-                print("[IMPORT_NODE]", n)
+            # ✅ 导入成功后自动刷新装配列表
+            QTimer.singleShot(100, self.refresh_assemblies)
+
         except Exception as e:
             self.main_window.show_error("导入失败", str(e))
             self.main_window.set_status("导入失败")
+            import traceback
+            traceback.print_exc()
+
+    def _import_solidworks_assembly_bom(self, step_path: str) -> Dict[str, Any]:
+        """导入SolidWorks装配（基于BOM）"""
+        # 获取装配名称
+        assembly_name = os.path.splitext(os. path.basename(step_path))[0]
+
+        # 询问用户是否添加描述（可选）
+        description, ok = QInputDialog.getText(
+            self. main_window,
+            "装配描述",
+            f"为装配 '{assembly_name}' 添加描述（可选）:",
+            text=f"从 {assembly_name}. SLDASM 导入"
+        )
+
+        if not ok:
+            description = None
+
+        # 导入
+        result = self.assembly_importer_bom.import_assembly_from_bom(
+            step_path,
+            assembly_name=assembly_name,
+            assembly_description=description
+        )
+
+        # 打印摘要
+        self.assembly_importer_bom.print_import_summary(result)
+
+        return result
 
     # ---------------- 装配求解（后台线程） ----------------
     @Slot(str, int)
     def solve_assembly(self, assembly_id: str, iterations: int):
         asm_id = assembly_id or None
         worker = SolveAssemblyWorker(asm_id, iterations, self)
-        self._workers.append(worker)
+        self._workers. append(worker)
 
         def on_finished(success: bool, message: str, used_asm_id: str):
             if success:
                 self.main_window.show_info("求解完成", message)
                 self.main_window.set_status(
-                    f"求解完成（装配: {used_asm_id or '最新'}，迭代: {iterations}）"
+                    f"求解完成（装配:  {used_asm_id or '最新'}，迭代: {iterations}）"
                 )
             else:
                 self.main_window.show_error("求解失败", message)
@@ -345,11 +433,11 @@ class ApplicationController(QObject):
 
         worker.finished.connect(on_finished)
         self.main_window.set_status(
-            f"开始求解装配（装配: {asm_id or '最新'}，迭代: {iterations}）"
+            f"开始求解装配（装配:  {asm_id or '最新'}，迭代: {iterations}）"
         )
         worker.start()
 
-    # ✅ ----------------  3.3.2 新增功能 ----------------
+    # ✅ ---------------- 3.3.2 新增功能 ----------------
 
     def _load_assembly_nodes_for_analysis(self, assembly_id: str) -> List[Dict[str, Any]]:
         """从数据库加载装配节点用于分析"""
@@ -358,33 +446,31 @@ class ApplicationController(QObject):
         from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
         import json
 
-        # ✅ 处理空字符串或"最新装配"的情况
-        if not assembly_id or assembly_id.strip() == "":
+        if not assembly_id or assembly_id. strip() == "":
             print("[DEBUG] 未指定装配ID，查找最新装配...")
             assembly_id = self._get_latest_assembly_id()
             if not assembly_id:
                 raise ValueError("数据库中没有装配记录，请先导入装配")
             print(f"[DEBUG] 使用最新装配ID: {assembly_id}")
 
-        # ✅ 验证UUID格式
         try:
             import uuid
-            uuid.UUID(assembly_id)  # 验证格式
+            uuid. UUID(assembly_id)
         except ValueError:
             raise ValueError(
-                f"无效的装配ID格式: {assembly_id}\n请输入有效的UUID（例如: 12345678-1234-1234-1234-123456789abc）")
+                f"无效的装配ID格式:  {assembly_id}\n请输入有效的UUID（例如: 12345678-1234-1234-1234-123456789abc）")
 
         sql = """
               SELECT an.id, an.name, an.transform_json
               FROM assembly_nodes an
-              WHERE an.assembly_id = %s \
+              WHERE an. assembly_id = %s
               """
 
         conn = get_conn()
         cur = conn.cursor(dictionary=True)
         try:
             cur.execute(sql, (uuid_to_bin(assembly_id),))
-            rows = cur.fetchall() or []
+            rows = cur. fetchall() or []
 
             if not rows:
                 raise ValueError(f"装配ID {assembly_id} 没有找到任何节点，请检查是否已导入")
@@ -401,12 +487,11 @@ class ApplicationController(QObject):
                 else:
                     transform = transform_data or {"pos": [0, 0, 0], "quat": [1, 0, 0, 0]}
 
-                # TODO: 从STEP文件加载真实几何
                 shape = BRepPrimAPI_MakeBox(10, 10, 10).Shape()
 
                 nodes.append({
                     'id': node_id,
-                    'name': row.get('name', ''),
+                    'name': row. get('name', ''),
                     'transform': transform,
                     'shape': shape
                 })
@@ -417,7 +502,6 @@ class ApplicationController(QObject):
             cur.close()
             conn.close()
 
-    # ✅ 新增：获取最新装配ID的方法
     def _get_latest_assembly_id(self) -> Optional[str]:
         """获取最新的装配ID"""
         from ..db.mysql import get_conn
@@ -427,7 +511,7 @@ class ApplicationController(QObject):
         conn = get_conn()
         cur = conn.cursor()
         try:
-            cur.execute(sql)
+            cur. execute(sql)
             row = cur.fetchone()
             if row:
                 return bin_to_uuid(row[0])
@@ -442,30 +526,27 @@ class ApplicationController(QObject):
         try:
             self.main_window.set_status("正在分析装配拓扑关系...")
 
-            # 加载装配节点
             nodes = self._load_assembly_nodes_for_analysis(assembly_id)
             if not nodes:
                 self.main_window.show_error("分析失败", "未找到装配节点")
                 return
 
-            # 执行拓扑分析
-            self.current_adjacency = self.topology_analyzer.analyze_assembly(nodes)
+            self.current_adjacency = self. topology_analyzer.analyze_assembly(nodes)
             self.current_assembly_nodes = nodes
 
-            # 显示结果
             report = f"""拓扑邻接分析完成
 
 节点数量: {len(self.current_adjacency.node_ids)}
-检测到的接触: {len(self.current_adjacency.contacts)}
+检测到的接触:  {len(self.current_adjacency.contacts)}
 
 接触详情:
 """
-            for contact in self.current_adjacency.contacts[:10]:  # 最多显示10个
-                report += f"\n• {contact.node_a_id[:8]} ↔ {contact.node_b_id[:8]}"
-                report += f"\n  类型: {contact.contact_type}, 距离: {contact.distance:. 4f}mm"
+            for contact in self.current_adjacency. contacts[: 10]:
+                report += f"\n• {contact. node_a_id[: 8]} ↔ {contact.node_b_id[:8]}"
+                report += f"\n  类型: {contact.contact_type}, 距离: {contact.distance:.4f}mm"
 
             if len(self.current_adjacency.contacts) > 10:
-                report += f"\n\n...还有 {len(self.current_adjacency.contacts) - 10} 个接触"
+                report += f"\n\n... 还有 {len(self.current_adjacency.contacts) - 10} 个接触"
 
             self.main_window.show_topology_result(report, self.current_adjacency)
             self.main_window.set_status("拓扑分析完成")
@@ -481,32 +562,29 @@ class ApplicationController(QObject):
         try:
             self.main_window.set_status("正在执行碰撞检测...")
 
-            # 加载或使用缓存的节点
             if not self.current_assembly_nodes:
                 nodes = self._load_assembly_nodes_for_analysis(assembly_id)
             else:
-                nodes = self.current_assembly_nodes
+                nodes = self. current_assembly_nodes
 
             if not nodes:
                 self.main_window.show_error("检测失败", "未找到装配节点")
                 return
 
-            # 执行碰撞检测
-            collisions = self.collision_detector.detect_collisions(nodes)
+            collisions = self.collision_detector. detect_collisions(nodes)
 
-            # 显示结果
             report = f"""碰撞检测完成
 
 总碰撞数: {len(collisions)}
 
 """
-            penetrations = [c for c in collisions if c.collision_type == 'penetration']
+            penetrations = [c for c in collisions if c. collision_type == 'penetration']
             contacts = [c for c in collisions if c.collision_type == 'contact']
 
             if penetrations:
                 report += f"⚠️ 干涉穿透: {len(penetrations)} 个\n"
-                for p in penetrations[:5]:
-                    report += f"  • {p.node_a_id[:8]} ↔ {p.node_b_id[:8]}: 深度={p.depth:.4f}mm\n"
+                for p in penetrations[: 5]:
+                    report += f"  • {p.node_a_id[:8]} ↔ {p.node_b_id[:8]}:  深度={p.depth:.4f}mm\n"
 
             if contacts:
                 report += f"\n✓ 紧密接触: {len(contacts)} 个\n"
@@ -528,7 +606,6 @@ class ApplicationController(QObject):
         try:
             self.main_window.set_status("正在验证装配...")
 
-            # 加载节点
             if not self.current_assembly_nodes:
                 nodes = self._load_assembly_nodes_for_analysis(assembly_id)
             else:
@@ -538,10 +615,8 @@ class ApplicationController(QObject):
                 self.main_window.show_error("验证失败", "未找到装配节点")
                 return
 
-            # 执行验证
             validation = self.collision_detector.validate_assembly(nodes)
 
-            # 显示结果
             is_valid = validation['is_valid']
             status_icon = "✓" if is_valid else "✗"
 
@@ -551,10 +626,10 @@ class ApplicationController(QObject):
 
 统计信息:
 • 总碰撞数: {validation['total_collisions']}
-• 干涉穿透: {validation['penetrations']}
+• 干涉穿透:  {validation['penetrations']}
 • 紧密接触: {validation['contacts']}
 • 间隙区域: {validation['clearances']}
-• 最大严重度: {validation['max_severity']:.2f}
+• 最大严重度: {validation['max_severity']:. 2f}
 
 """
 
@@ -568,6 +643,235 @@ class ApplicationController(QObject):
             self.main_window.set_status("装配验证完成")
 
         except Exception as e:
-            self.main_window.show_error("装配验证失败", f"验证失败: {e}")
+            self.main_window.show_error("装配验证失败", f"验证失败:  {e}")
+            import traceback
+            traceback.print_exc()
+
+    # ✅ ---------------- SolidWorks BOM提取功能 ----------------
+
+    @Slot(str, str, str)
+    def extract_bom_auto(self, sldasm_path: str, output_path: str, format: str = "excel"):
+        """从SolidWorks提取BOM（自动模式）"""
+        try:
+            self.main_window.set_status("启动SolidWorks...")
+
+            extractor = SolidWorksBOMExtractorAuto()
+
+            # 启动SolidWorks（后台）
+            if not extractor.start_solidworks(visible=False):
+                raise RuntimeError("无法启动SolidWorks")
+
+            self.main_window.set_status("打开装配文件...")
+
+            # 打开文件
+            if not extractor. open_assembly(sldasm_path):
+                raise RuntimeError("无法打开装配文件")
+
+            self.main_window.set_status("提取BOM...")
+
+            # 提取BOM
+            bom_items = extractor.extract_bom()
+
+            if not bom_items:
+                self.main_window.show_warning("提取结果", "未找到BOM项")
+                return
+
+            extractor.print_summary()
+
+            # 导出
+            self.main_window.set_status("导出BOM...")
+
+            # 标准化输出路径
+            output_path = self._normalize_output_path(output_path, format)
+
+            if format. lower() == "excel":
+                extractor.export_to_excel(output_path)
+            elif format. lower() == "json":
+                extractor.export_to_json(output_path)
+            elif format.lower() == "csv":
+                extractor.export_to_csv(output_path)
+            else:
+                extractor.export_to_excel(output_path)
+
+            # 显示结果
+            total_parts = len(bom_items)
+            total_quantity = sum(item.quantity for item in bom_items)
+
+            self.main_window.show_info(
+                "BOM提取成功",
+                f"✅ 提取完成！\n\n"
+                f"📊 统计:\n"
+                f"  • 独特零件: {total_parts}\n"
+                f"  • 总数量: {total_quantity}\n\n"
+                f"📁 文件:  {os.path.basename(output_path)}"
+            )
+
+            self.main_window.set_status(f"BOM已导出:  {os.path.basename(output_path)}")
+
+        except Exception as e:
+            self.main_window.show_error("BOM提取失败", str(e))
+            self.main_window.set_status("BOM提取失败")
+            import traceback
+            traceback. print_exc()
+
+        finally:
+            try:
+                extractor.close_document()
+                extractor.quit_solidworks()
+            except:
+                pass
+
+    def _normalize_output_path(self, output_path: str, format: str) -> str:
+        """标准化输出路径，避免重复扩展名"""
+        ext_map = {
+            'excel': '.xlsx',
+            'json': '.json',
+            'csv': '.csv'
+        }
+
+        correct_ext = ext_map.get(format.lower(), '.xlsx')
+
+        # 移除重复扩展名
+        for ext in ['.xlsx', '.json', '.csv']:
+            double_ext = ext + ext
+            if output_path.endswith(double_ext):
+                output_path = output_path[:-len(ext)]
+                break
+
+        # 确保有正确的扩展名
+        if not output_path.endswith(correct_ext):
+            base_name = os.path.splitext(output_path)[0]
+            output_path = base_name + correct_ext
+
+        return output_path
+
+    # ✅ ---------------- 装配查看和可视化功能 ----------------
+
+    @Slot()
+    def refresh_assemblies(self):
+        """刷新装配列表"""
+        try:
+            self.main_window.set_status("正在加载装配列表...")
+
+            # 从数据库获取所有装配
+            assemblies = self.assembly_viewer. get_all_assemblies()
+
+            # 更新UI
+            self.main_window.populate_assembly_tree(assemblies)
+
+            self.main_window.set_status(f"✅ 已加载 {len(assemblies)} 个装配")
+
+        except Exception as e:
+            self.main_window.show_error("加载装配列表失败", str(e))
+            self.main_window.set_status("❌ 加载装配列表失败")
+            import traceback
+            traceback.print_exc()
+
+    @Slot(str)
+    def on_assembly_selected(self, assembly_id: str):
+        """装配选中事件（单击装配）"""
+        try:
+            # 展开装配，显示部件列表
+            nodes = self. assembly_viewer.get_assembly_nodes(assembly_id)
+            self.main_window.populate_assembly_nodes(assembly_id, nodes)
+
+            self.main_window.set_status(
+                f"📦 装配包含 {len(nodes)} 个部件，双击装配名称可加载到3D视图"
+            )
+
+        except Exception as e:
+            self.main_window.show_error("加载装配节点失败", str(e))
+            import traceback
+            traceback.print_exc()
+
+    @Slot(str)
+    def load_assembly(self, assembly_id: str):
+        """加载装配到3D视图（双击装配）"""
+        try:
+            self.main_window.set_status("正在加载装配到3D视图...")
+
+            # 获取装配的所有节点
+            nodes = self.assembly_viewer.get_assembly_nodes(assembly_id)
+
+            if not nodes:
+                self.main_window.show_warning("空装配", "该装配没有部件")
+                return
+
+            # 清空当前3D视图
+            self.part_visualizer.clear_all()
+
+            # 逐个显示部件
+            loaded_count = 0
+            failed_count = 0
+
+            for idx, node in enumerate(nodes, 1):
+                # 更新进度
+                self.main_window.set_status(
+                    f"正在加载部件 {idx}/{len(nodes)}: {node['node_name']}..."
+                )
+
+                if node. get('step_uri'):
+                    success = self.part_visualizer. display_node(
+                        node['node_id'],
+                        node['step_uri'],
+                        transform=node.get('transform_json')
+                    )
+
+                    if success:
+                        loaded_count += 1
+                    else:
+                        failed_count += 1
+                else:
+                    failed_count += 1
+
+            # 刷新显示并适应视图
+            self.part_visualizer.fit_all()
+
+            # 保存当前状态
+            self.current_assembly_id = assembly_id
+            self. current_displayed_nodes = nodes
+
+            # 显示结果
+            status_msg = f"✅ 已加载装配:  {loaded_count}/{len(nodes)} 个部件"
+            if failed_count > 0:
+                status_msg += f"（{failed_count} 个失败）"
+
+            self.main_window.set_status(status_msg)
+
+            if loaded_count == 0:
+                self.main_window.show_warning(
+                    "加载失败",
+                    f"无法加载任何部件\n可能原因：\n"
+                    f"• STEP文件路径不正确\n"
+                    f"• STEP文件已被删除或移动"
+                )
+
+        except Exception as e:
+            self.main_window.show_error("加载装配失败", str(e))
+            self.main_window.set_status("❌ 加载装配失败")
+            import traceback
+            traceback.print_exc()
+
+    @Slot(str, str)
+    def on_node_selected(self, assembly_id: str, node_id: str):
+        """部件选中事件（单击部件）"""
+        try:
+            # 取消之前的高亮
+            self.part_visualizer.unhighlight_all()
+
+            # 高亮选中的部件
+            self. part_visualizer.highlight_node(node_id)
+
+            # 查找节点信息并显示
+            for node in self.current_displayed_nodes:
+                if node['node_id'] == node_id:
+                    self.main_window.set_status(
+                        f"✨ 选中: {node['node_name']} | "
+                        f"零件:  {node['part_name']} v{node['version_no']}"
+                    )
+                    break
+
+        except Exception as e:
+            print(f"⚠️ 高亮部件失败: {e}")
             import traceback
             traceback.print_exc()

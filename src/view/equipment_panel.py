@@ -4,9 +4,11 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                                QPushButton, QLabel, QListWidget,
                                QListWidgetItem, QGroupBox, QMessageBox,
-                               QTextEdit, QSplitter)
+                               QTextEdit, QSplitter,
+                               QTreeWidget, QTreeWidgetItem,  # ✅ 添加树形控件
+                               QStyle)  # ✅ 添加样式
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QColor  # ✅ 添加颜色
 import json
 from typing import List, Dict, Any, Optional
 
@@ -17,12 +19,18 @@ class EquipmentPanel(QWidget):
     equipment_selected = Signal(str)  # 选中装备时发送装备ID
     equipment_loaded = Signal(dict)  # 加载装备数据时发送完整数据
 
+    # ✅ 新增信号：装配管理相关
+    assembly_selected = Signal(str)  # assembly_id
+    node_selected = Signal(str, str)  # assembly_id, node_id
+    load_assembly_requested = Signal(str)  # assembly_id
+    refresh_assemblies_requested = Signal()  # ✅ 添加刷新信号
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_equipment = None
         self.equipment_list = []
         self.setup_ui()
-        self.load_equipment_list()
+        # self.load_equipment_list()
 
     def setup_ui(self):
         """构建UI"""
@@ -43,9 +51,32 @@ class EquipmentPanel(QWidget):
         list_group = QGroupBox("可用装备")
         list_layout = QVBoxLayout()
 
-        self.equipment_list_widget = QListWidget()
-        self.equipment_list_widget.itemSelectionChanged.connect(self._on_selection_changed)
-        self.equipment_list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
+        # ✅ 改为树形控件
+        self.equipment_list_widget = QTreeWidget()
+        self.equipment_list_widget.setHeaderLabels(["名称", "信息"])
+        self.equipment_list_widget.setColumnWidth(0, 200)
+        self.equipment_list_widget.setAlternatingRowColors(True)
+        self.equipment_list_widget.setStyleSheet("""
+            QTreeWidget {
+                border: 1px solid #BDBDBD;
+                border-radius: 4px;
+                background-color:  white;
+            }
+            QTreeWidget::item {
+                padding:  4px;
+            }
+            QTreeWidget::item: hover {
+                background-color: #E8F5E9;
+            }
+            QTreeWidget::item: selected {
+                background-color:  #81C784;
+                color: white;
+            }
+        """)
+
+        # ✅ 连接事件
+        self.equipment_list_widget.itemClicked.connect(self._on_tree_item_clicked)
+        self.equipment_list_widget.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
         list_layout.addWidget(self.equipment_list_widget)
 
         # 列表控制按钮
@@ -61,7 +92,7 @@ class EquipmentPanel(QWidget):
                 background-color: #2196F3;
                 color:  white;
                 padding: 6px;
-                border-radius: 3px;
+                border-radius:  3px;
             }
             QPushButton:hover {
                 background-color: #1976D2;
@@ -70,11 +101,41 @@ class EquipmentPanel(QWidget):
         btn_load.clicked.connect(self._on_load_equipment)
         list_btn_layout.addWidget(btn_load)
 
+        # ✅ 添加清空3D视图按钮
+        btn_clear = QPushButton("🗑️ 清空3D")
+        btn_clear.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                padding: 6px;
+                border-radius: 3px;
+            }
+            QPushButton:hover {
+                background-color: #FB8C00;
+            }
+        """)
+        btn_clear.clicked.connect(self._on_clear_3d_view)
+        list_btn_layout.addWidget(btn_clear)
+
         list_layout.addLayout(list_btn_layout)
+
+        # ✅ 添加提示标签
+        hint_label = QLabel("💡 双击装配加载到3D视图，单击部件高亮")
+        hint_label.setStyleSheet("""
+            QLabel {
+                color: #666;
+                font-size: 9pt;
+                padding: 5px;
+                background-color: #FFF9C4;
+                border-radius: 3px;
+            }
+        """)
+        list_layout.addWidget(hint_label)
+
         list_group.setLayout(list_layout)
         splitter.addWidget(list_group)
 
-        # ----- 下部：装备详情 -----
+        # ----- 下部：装备详情（保持不变）-----
         detail_group = QGroupBox("装备详情")
         detail_layout = QVBoxLayout()
 
@@ -101,245 +162,168 @@ class EquipmentPanel(QWidget):
         detail_group.setLayout(detail_layout)
         splitter.addWidget(detail_group)
 
-        splitter.setSizes([300, 200])
+        # 添加分割器到主布局
         layout.addWidget(splitter)
 
-        # ===== 底部统计信息 =====
+        # 底部统计信息
         self.stats_label = QLabel("装备总数: 0")
-        self.stats_label.setStyleSheet("color: #666; font-size:  10pt; padding: 5px;")
+        self.stats_label.setStyleSheet("color: #666; padding: 5px;")
         layout.addWidget(self.stats_label)
 
+    # ✅ 新增：树形控件点击事件
+    def _on_tree_item_clicked(self, item: QTreeWidgetItem, column: int):
+        """树项单击事件"""
+        assembly_id = item.data(0, Qt.UserRole)
+        node_id = item.data(0, Qt.UserRole + 1)
+
+        if node_id:
+            # 点击的是部件节点 - 高亮
+            print(f"选中部件: {item.text(0)}")
+            self.node_selected.emit(assembly_id, node_id)
+            self._update_detail_for_node(item)
+        elif assembly_id:
+            # 点击的是装配 - 展开
+            print(f"选中装配:  {item.text(0)}")
+            self.assembly_selected.emit(assembly_id)
+            self._update_detail_for_assembly(item)
+
+    # ✅ 新增：树形控件双击事件
+    def _on_tree_item_double_clicked(self, item: QTreeWidgetItem, column: int):
+        """树项双击事件"""
+        assembly_id = item.data(0, Qt.UserRole)
+        node_id = item.data(0, Qt.UserRole + 1)
+
+        if not node_id and assembly_id:
+            # 双击装配 - 加载到3D视图
+            print(f"加载装配: {item.text(0)}")
+            self.load_assembly_requested.emit(assembly_id)
+
+    # ✅ 新增：清空3D视图
+    def _on_clear_3d_view(self):
+        """清空3D视图（通过主窗口）"""
+        # 发出信号，由主窗口处理
+        from PySide6.QtCore import QMetaObject, Q_ARG
+        main_window = self.window()
+        if hasattr(main_window, 'canvas'):
+            try:
+                main_window.canvas._display.EraseAll()
+                main_window.canvas._display.Repaint()
+                main_window.set_status("已清空3D视图")
+            except Exception as e:
+                print(f"清空视图失败: {e}")
+
+    # ✅ 新增：填充装配树（由控制器调用）
+    def populate_assembly_tree(self, assemblies: List[Dict[str, Any]]):
+        """填充装配树"""
+        self.equipment_list_widget.clear()
+
+        if not assemblies:
+            empty_item = QTreeWidgetItem(self.equipment_list_widget)
+            empty_item.setText(0, "暂无装配")
+            empty_item.setForeground(0, QColor("#999"))
+            return
+
+        for asm in assemblies:
+            asm_item = QTreeWidgetItem(self.equipment_list_widget)
+            asm_item.setText(0, asm['name'])
+            asm_item.setText(1, f"{asm.get('node_count', 0)} 个部件")
+            asm_item.setData(0, Qt.UserRole, asm['id'])
+            asm_item.setIcon(0, self.style().standardIcon(QStyle.SP_DirIcon))
+
+            font = asm_item.font(0)
+            font.setBold(True)
+            asm_item.setFont(0, font)
+            asm_item.setForeground(0, QColor("#1976D2"))
+
+        self.stats_label.setText(f"装备总数: {len(assemblies)}")
+
+    # ✅ 新增：填充装配节点
+    def populate_assembly_nodes(self, assembly_id: str, nodes: List[Dict[str, Any]]):
+        """填充装配的部件节点"""
+        for i in range(self.equipment_list_widget.topLevelItemCount()):
+            asm_item = self.equipment_list_widget.topLevelItem(i)
+            if asm_item.data(0, Qt.UserRole) == assembly_id:
+                asm_item.takeChildren()
+
+                # 按零件分组
+                part_groups = {}
+                for node in nodes:
+                    part_key = node['part_key']
+                    if part_key not in part_groups:
+                        part_groups[part_key] = []
+                    part_groups[part_key].append(node)
+
+                # 添加节点
+                for part_key, part_nodes in sorted(part_groups.items()):
+                    if len(part_nodes) == 1:
+                        node = part_nodes[0]
+                        node_item = QTreeWidgetItem(asm_item)
+                        node_item.setText(0, node['node_name'])
+                        node_item.setText(1, f"v{node['version_no']}")
+                        node_item.setData(0, Qt.UserRole, assembly_id)
+                        node_item.setData(0, Qt.UserRole + 1, node['node_id'])
+                        node_item.setIcon(0, self.style().standardIcon(QStyle.SP_FileIcon))
+                    else:
+                        group_item = QTreeWidgetItem(asm_item)
+                        group_item.setText(0, part_key)
+                        group_item.setText(1, f"{len(part_nodes)} 个")
+                        group_item.setIcon(0, self.style().standardIcon(QStyle.SP_DirIcon))
+
+                        for node in part_nodes:
+                            instance_item = QTreeWidgetItem(group_item)
+                            instance_item.setText(0, node['node_name'])
+                            instance_item.setText(1, f"v{node['version_no']}")
+                            instance_item.setData(0, Qt.UserRole, assembly_id)
+                            instance_item.setData(0, Qt.UserRole + 1, node['node_id'])
+                            instance_item.setIcon(0, self.style().standardIcon(QStyle.SP_FileIcon))
+
+                asm_item.setExpanded(True)
+                break
+
+    def _update_detail_for_assembly(self, item: QTreeWidgetItem):
+        """更新装配的详情显示"""
+        assembly_name = item.text(0)
+        node_count = item.text(1)
+
+        self.info_label.setText(
+            f"<b>装配名称:</b> {assembly_name}<br>"
+            f"<b>部件数量:</b> {node_count}<br>"
+            f"<br>"
+            f"<i>双击装配名称可加载到3D视图</i>"
+        )
+        self.detail_text.clear()
+
+    def _update_detail_for_node(self, item: QTreeWidgetItem):
+        """更新部件节点的详情显示"""
+        node_name = item.text(0)
+        version = item.text(1)
+
+        self.info_label.setText(
+            f"<b>部件名称:</b> {node_name}<br>"
+            f"<b>版本:</b> {version}<br>"
+            f"<br>"
+            f"<i>点击可在3D视图中高亮显示</i>"
+        )
+        self.detail_text.clear()
+
+    # 保留原有的方法
     def load_equipment_list(self):
-        """从数据库加载装备列表"""
-        try:
-            from ..db.mysql import get_conn
-            from ..db.util import bin_to_uuid
-
-            conn = get_conn()
-            cur = conn.cursor(dictionary=True)
-
-            # 查询所有装配（视为装备）
-            cur.execute("""
-                        SELECT a.id,
-                               a.name,
-                               a.created_at,
-                               COUNT(an.id) as part_count
-                        FROM assemblies a
-                                 LEFT JOIN assembly_nodes an ON an.assembly_id = a.id
-                        GROUP BY a.id, a.name, a.created_at
-                        ORDER BY a.created_at DESC
-                        """)
-
-            assemblies = cur.fetchall()
-            cur.close()
-            conn.close()
-
-            # 清空列表
-            self.equipment_list_widget.clear()
-            self.equipment_list = []
-
-            # 填充列表
-            for asm in assemblies:
-                equipment_id = bin_to_uuid(asm['id'])
-                equipment_name = asm.get('name', 'Unnamed')
-                part_count = asm.get('part_count', 0)
-                created_at = str(asm.get('created_at', ''))
-
-                # 存储装备数据
-                equipment_data = {
-                    'id': equipment_id,
-                    'name': equipment_name,
-                    'part_count': part_count,
-                    'created_at': created_at
-                }
-                self.equipment_list.append(equipment_data)
-
-                # 创建列表项
-                item = QListWidgetItem(f"📦 {equipment_name} ({part_count}个部件)")
-                item.setData(Qt.UserRole, equipment_id)
-                item.setToolTip(f"ID: {equipment_id}\n创建时间: {created_at}")
-                self.equipment_list_widget.addItem(item)
-
-            # 更新统计
-            self.stats_label.setText(f"装备总数: {len(self.equipment_list)}")
-
-            if not assemblies:
-                self.info_label.setText("⚠️ 数据库中暂无装备\n\n请先导入装配（数据库 → 导入装配并入库）")
-
-        except Exception as e:
-            QMessageBox.critical(self, "加载失败", f"无法加载装备列表：\n{str(e)}")
-            import traceback
-            traceback.print_exc()
+        """触发刷新装配列表"""
+        # 发出信号，让控制器刷新
+        self.refresh_assemblies_requested.emit()
 
     def _on_selection_changed(self):
-        """选中装备时显示详情"""
-        selected_items = self.equipment_list_widget.selectedItems()
-        if not selected_items:
-            return
-
-        item = selected_items[0]
-        equipment_id = item.data(Qt.UserRole)
-
-        # 查找对应的装备数据
-        equipment = next((e for e in self.equipment_list if e['id'] == equipment_id), None)
-        if not equipment:
-            return
-
-        self.current_equipment = equipment
-
-        # 显示基本信息
-        info_text = f"""
-<b>装备名称:</b> {equipment['name']}<br>
-<b>部件数量:</b> {equipment['part_count']}<br>
-<b>创建时间:</b> {equipment['created_at']}<br>
-<b>装备ID:</b> <code>{equipment['id']}</code>
-        """.strip()
-        self.info_label.setText(info_text)
-
-        # 加载详细参数
-        self._load_equipment_details(equipment_id)
-
-        # 发送信号
-        self.equipment_selected.emit(equipment_id)
-
-    def _load_equipment_details(self, equipment_id: str):
-        """加载装备详细参数"""
-        try:
-            from ..db.mysql import get_conn
-
-            conn = get_conn()
-            cur = conn.cursor(dictionary=True)
-
-            # 查询装备的所有节点和参数
-            cur.execute("""
-                        SELECT an.name as node_name,
-                               an.transform_json,
-                               pv.params_json,
-                               p.name  as part_name
-                        FROM assembly_nodes an
-                                 LEFT JOIN part_versions pv ON pv.id = an.part_version_id
-                                 LEFT JOIN parts p ON p.id = pv.part_id
-                        WHERE an.assembly_id = UUID_TO_BIN(%s)
-                        """, (equipment_id,))
-
-            nodes = cur.fetchall()
-            cur.close()
-            conn.close()
-
-            # 格式化显示
-            details = {
-                "equipment_id": equipment_id,
-                "parts": []
-            }
-
-            for node in nodes:
-                part_detail = {
-                    "node_name": node.get('node_name', 'Unknown'),
-                    "part_name": node.get('part_name', 'Unknown'),
-                    "transform": json.loads(node['transform_json']) if node.get('transform_json') else {},
-                    "params": json.loads(node['params_json']) if node.get('params_json') else {}
-                }
-                details["parts"].append(part_detail)
-
-            # 显示JSON
-            detail_json = json.dumps(details, ensure_ascii=False, indent=2)
-            self.detail_text.setText(detail_json)
-
-        except Exception as e:
-            self.detail_text.setText(f"加载详情失败:  {str(e)}")
+        """选中变化（旧方法，可以保留或删除）"""
+        pass
 
     def _on_item_double_clicked(self, item):
-        """双击加载装备"""
-        self._on_load_equipment()
+        """双击项（旧方法，已被 _on_tree_item_double_clicked 替代）"""
+        pass
 
     def _on_load_equipment(self):
-        """加载选中的装备"""
-        if not self.current_equipment:
-            QMessageBox.warning(self, "未选择", "请先选择一个装备")
-            return
-
-        try:
-            # 获取完整的装备数据
-            equipment_data = self._get_full_equipment_data(self.current_equipment['id'])
-
-            if equipment_data:
-                # 发送信号
-                self.equipment_loaded.emit(equipment_data)
-
-                QMessageBox.information(
-                    self,
-                    "加载成功",
-                    f"装备 '{self.current_equipment['name']}' 已加载\n\n"
-                    f"包含 {len(equipment_data.get('parts', []))} 个部件"
-                )
-        except Exception as e:
-            QMessageBox.critical(self, "加载失败", f"无法加载装备数据：\n{str(e)}")
-
-    def _get_full_equipment_data(self, equipment_id: str) -> Optional[Dict[str, Any]]:
-        """获取完整的装备数据（用于传递给Unity）"""
-        try:
-            from ..db.mysql import get_conn
-
-            conn = get_conn()
-            cur = conn.cursor(dictionary=True)
-
-            # 获取装配信息
-            cur.execute("""
-                        SELECT id, name, created_at
-                        FROM assemblies
-                        WHERE id = UUID_TO_BIN(%s)
-                        """, (equipment_id,))
-
-            assembly = cur.fetchone()
-            if not assembly:
-                return None
-
-            # 获取所有节点
-            cur.execute("""
-                        SELECT an.id,
-                               an.name as node_name,
-                               an.transform_json,
-                               pv.params_json,
-                               p.key   as part_key,
-                               p.name  as part_name
-                        FROM assembly_nodes an
-                                 LEFT JOIN part_versions pv ON pv.id = an.part_version_id
-                                 LEFT JOIN parts p ON p.id = pv.part_id
-                        WHERE an.assembly_id = UUID_TO_BIN(%s)
-                        """, (equipment_id,))
-
-            nodes = cur.fetchall()
-            cur.close()
-            conn.close()
-
-            # 组装数据
-            from ..db.util import bin_to_uuid
-
-            equipment_data = {
-                "equipment_id": equipment_id,
-                "equipment_name": assembly['name'],
-                "created_at": str(assembly.get('created_at', '')),
-                "parts": []
-            }
-
-            for node in nodes:
-                part_data = {
-                    "id": bin_to_uuid(node['id']),
-                    "name": node.get('node_name', 'Unknown'),
-                    "part_key": node.get('part_key', ''),
-                    "part_name": node.get('part_name', ''),
-                    "transform": json.loads(node['transform_json']) if node.get('transform_json') else {
-                        "pos": [0, 0, 0],
-                        "quat": [1, 0, 0, 0]
-                    },
-                    "params": json.loads(node['params_json']) if node.get('params_json') else {}
-                }
-                equipment_data["parts"].append(part_data)
-
-            return equipment_data
-
-        except Exception as e:
-            print(f"获取装备数据失败: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
+        """加载按钮点击"""
+        current_item = self.equipment_list_widget.currentItem()
+        if current_item:
+            assembly_id = current_item.data(0, Qt.UserRole)
+            if assembly_id:
+                self.load_assembly_requested.emit(assembly_id)

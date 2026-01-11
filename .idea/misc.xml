@@ -4,4 +4,7 @@
     <option name="sdkName" value="cad_analysis" />
   </component>
   <component name="ProjectRootManager" version="2" project-jdk-name="cad_analysis" project-jdk-type="Python SDK" />
+  <component name="PythonCompatibilityInspectionAdvertiser">
+    <option name="version" value="3" />
+  </component>
 </project>
