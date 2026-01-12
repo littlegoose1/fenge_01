@@ -7,7 +7,7 @@ from OCC.Core.TopoDS import TopoDS_Shape
 from OCC.Core.STEPControl import STEPControl_Writer, STEPControl_AsIs
 from OCC.Core.IFSelect import IFSelect_RetDone
 from OCC.Core.Interface import Interface_Static
-from OCC.Core.Bnd import Bnd_Box
+from OCC.Core. Bnd import Bnd_Box
 
 # -------- 兼容层：BRepBndLib Add --------
 try:
@@ -18,7 +18,7 @@ except ImportError:
     except ImportError:
         _bnd_add = None  # 极端情况：无法计算包围盒
 
-from .mysql_repo import MySQLRepo
+from . mysql_repo import MySQLRepo
 from .uuid_util import uuid_bytes_to_str
 
 
@@ -29,7 +29,7 @@ def _ensure_dir(d: str):
 def _sha256_of_file(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
+        for chunk in iter(lambda: f. read(8192), b""):
             h.update(chunk)
     return h.hexdigest()
 
@@ -64,13 +64,18 @@ class PersistenceService:
         _ensure_dir(self.export_dir)
 
     def _export_shape_to_step(self, shape: TopoDS_Shape, out_path: str) -> bool:
-        writer = STEPControl_Writer()
-        Interface_Static.SetCVal("write.step.schema", "AP214")
-        status = writer.Transfer(shape, STEPControl_AsIs)
-        if status != IFSelect_RetDone:
+        """导出形状为STEP文件"""
+        try:
+            writer = STEPControl_Writer()
+            Interface_Static.SetCVal("write. step. schema", "AP214")
+            status = writer.Transfer(shape, STEPControl_AsIs)
+            if status != IFSelect_RetDone:
+                return False
+            status = writer.Write(out_path)
+            return status == IFSelect_RetDone
+        except Exception as e:
+            print(f"导出STEP失败: {e}")
             return False
-        status = writer.Write(out_path)
-        return status == IFSelect_RetDone
 
     def persist_part_version(
         self,
@@ -94,19 +99,19 @@ class PersistenceService:
 
         safe_stub = step_file_stub or part_key.replace("/", "_")
         filename = f"{safe_stub}_v{version_no}.step"
-        out_path = os.path.abspath(os.path.join(self.export_dir, filename))
+        out_path = os.path. abspath(os.path.join(self.export_dir, filename))
         ok = self._export_shape_to_step(shape, out_path)
         if not ok:
             raise RuntimeError(f"导出 STEP 失败: {out_path}")
 
         bbox = _compute_bbox(shape)
         sha256_hex = _sha256_of_file(out_path)
-        uri = f"file://{out_path.replace(os.sep, '/')}"
-        cad_asset_id = self.repo.insert_geom_asset(
+        uri = f"file://{out_path.replace(os. sep, '/')}"
+        cad_asset_id = self. repo.insert_geom_asset(
             uri=uri,
             sha256_hex=sha256_hex,
             format_="step",
-            units=self.units,
+            units=self. units,
             bbox_json=bbox,
             meta_json=meta_asset or {}
         )
@@ -143,7 +148,7 @@ class PersistenceService:
             "part_id": uuid_bytes_to_str(part_id),
             "part_version_id": uuid_bytes_to_str(part_version_id),
             "cad_asset_id": uuid_bytes_to_str(cad_asset_id),
-            "version_no": version_no,
+            "version_no":  version_no,
             "step_path": out_path,
             "uri": uri,
             "sha256": sha256_hex,

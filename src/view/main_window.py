@@ -227,6 +227,9 @@ class MainWindow(QMainWindow):
     load_assembly_requested = Signal(str)
     refresh_assemblies_requested = Signal()
 
+    # ✅ 新增：加载零件进行分割
+    load_part_for_segmentation_requested = Signal(str, str)  # part_version_id, step_uri
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("单兵装备数字化设计系统")
@@ -998,6 +1001,9 @@ class MainWindow(QMainWindow):
         # ✅ 添加刷新信号连接
         self.equipment_panel.refresh_assemblies_requested.connect(self._on_refresh_assemblies_from_panel)
 
+        # ✅ 连接加载零件进行分割的信号
+        self.equipment_panel.load_part_for_segmentation.connect(self._on_load_part_for_segmentation)
+
 
     def on_equipment_selected(self, equipment_id: str):
         """装备被选中时的回调"""
@@ -1040,4 +1046,13 @@ class MainWindow(QMainWindow):
 
     def _on_refresh_assemblies_from_panel(self):
         """装备面板请求刷新时转发信号"""
+        self.refresh_assemblies_requested.emit()
+
+    # ✅ 添加转发方法
+    def _on_load_part_for_segmentation(self, part_version_id: str, step_uri: str):
+        """加载零件进行分割（转发信号）"""
+        self.load_part_for_segmentation_requested.emit(part_version_id, step_uri)
+
+    def _on_refresh_assemblies_from_panel(self):
+        """刷新装配列表（转发信号）"""
         self.refresh_assemblies_requested.emit()

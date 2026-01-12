@@ -556,3 +556,329 @@ class SolidWorksBOMExtractorAuto:
             print(f"... 还有 {len(self.bom_items) - 20} 项")
 
         print("=" * 70 + "\n")
+
+    def export_component_step(self, component_name: str, output_path: str) -> bool:
+        """
+        导出指定零件/子装配为STEP文件（基于SolidWorks 2022 API官方文档）
+
+        参考文档:
+        - IComponent2::GetReferencedModelDoc()
+        - IComponent2::GetSuppression (属性)
+        - IModelDoc2::SaveAs3()
+
+        Args:
+            component_name: 零件/子装配名称
+            output_path:     输出STEP文件路径
+
+        Returns:
+            是否导出成功
+        """
+        if not self.sw_app or not self.model_doc:
+            print(f"      ⚠ SolidWorks未初始化")
+            return False
+
+        try:
+            # 获取配置管理器
+            config_mgr = self.model_doc.ConfigurationManager
+            if not config_mgr:
+                print(f"      ⚠ 无法获取配置管理器")
+                return False
+
+            active_config = config_mgr.ActiveConfiguration
+            if not active_config:
+                print(f"      ⚠ 无法获取活动配置")
+                return False
+
+            root_comp = active_config.GetRootComponent3(True)
+            if not root_comp:
+                print(f"      ⚠ 无法获取根组件")
+                return False
+
+            # GetChildren 是属性，不是方法
+            children = root_comp.GetChildren
+
+            if not children or len(children) == 0:
+                print(f"      ⚠ 装配中没有子组件")
+                return False
+
+            # 规范化组件名称用于匹配
+            component_normalized = component_name.replace(' ', '_').lower()
+
+            # 遍历子组件
+            for child in children:
+                try:
+                    comp_name = child.Name2
+
+                    # 获取基础名称（去掉实例编号）
+                    base_name = comp_name.split('-')[0] if '-' in comp_name else comp_name
+                    base_normalized = base_name.replace(' ', '_').lower()
+
+                    # 检查是否匹配
+                    if (component_normalized in base_normalized or
+                            base_normalized.startswith(component_normalized)):
+
+                        print(f"      ✓ 找到匹配组件: {comp_name}")
+
+                        # ✅ 使用 GetReferencedModelDoc() 而不是 GetModelDoc2()
+                        # 这个方法会自动处理轻量化组件
+                        comp_model = child.GetReferencedModelDoc()
+
+                        if not comp_model:
+                            print(f"      ⚠ 无法获取组件引用文档（可能被抑制）")
+                            continue
+
+                        # 确保输出目录存在
+                        output_dir = os.path.dirname(output_path)
+                        if output_dir and not os.path.exists(output_dir):
+                            os.makedirs(output_dir)
+
+                        # ✅ 清除选择（如果方法存在）
+                        try:
+                            comp_model.ClearSelection2(True)
+                        except:
+                            pass
+
+                        # ✅ 使用 SaveAs3 导出STEP
+                        try:
+                            success = comp_model.SaveAs3(
+                                output_path,
+                                0,  # swSaveAsCurrentVersion
+                                0  # swSaveAsOptions_Silent
+                            )
+
+                            if success:
+                                # 验证文件是否真的创建了
+                                if os.path.exists(output_path):
+                                    file_size = os.path.getsize(output_path)
+                                    print(f"      ✅ STEP已导出: {os.path.basename(output_path)} ({file_size} bytes)")
+                                    return True
+                                else:
+                                    print(f"      ⚠ SaveAs3成功但文件不存在")
+                            else:
+                                print(f"      ⚠ SaveAs3返回False")
+
+                        except Exception as save_ex:
+                            print(f"      ⚠ SaveAs3异常: {save_ex}")
+                            continue
+
+                except Exception as e:
+                    print(f"      ⚠ 处理组件异常: {e}")
+                    continue
+
+            print(f"      ⚠ 未找到可导出的匹配组件:  {component_name}")
+            return False
+
+        except Exception as e:
+            print(f"      ❌ 导出组件失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def export_all_components_to_step(self, output_dir: str) -> Dict[str, str]:
+        """批量导出装配中所有零件为STEP文件"""
+        if not self.sw_app or not self.model_doc:
+            print("⚠ SolidWorks未初始化")
+            return {}
+
+        print(f"\n{'=' * 70}")
+        print(f"📤 批量导出零件为STEP")
+        print(f"{'=' * 70}\n")
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        exported = {}
+        exported_parts = set()
+
+        try:
+            config_mgr = self.model_doc.ConfigurationManager
+            if not config_mgr:
+                print("⚠ 无法获取配置管理器")
+                return {}
+
+            active_config = config_mgr.ActiveConfiguration
+            if not active_config:
+                print("⚠ 无法获取活动配置")
+                return {}
+
+            root_comp = active_config.GetRootComponent3(True)
+            if not root_comp:
+                print("⚠ 无法获取根组件")
+                return {}
+
+            children = root_comp.GetChildren
+
+            if not children or len(children) == 0:
+                print("⚠ 装配中没有子组件")
+                return {}
+
+            total = len(children)
+            print(f"找到 {total} 个组件实例\n")
+
+            for idx, child in enumerate(children, 1):
+                try:
+                    comp_name = child.Name2
+                    base_name = comp_name.split('-')[0] if '-' in comp_name else comp_name
+                    base_name_normalized = base_name.replace(' ', '_')
+
+                    if base_name_normalized in exported_parts:
+                        print(f"  [{idx}/{total}] ⊙ 跳过（已导出）:  {base_name}")
+                        continue
+
+                    print(f"  [{idx}/{total}] 📦 处理: {base_name}")
+
+                    # 获取组件路径
+                    comp_path = child.GetPathName  # 属性
+
+                    if not comp_path:
+                        print(f"         ⚠ 无法获取组件路径")
+                        continue
+
+                    comp_doc = None
+
+                    # ✅ 关键修复：在 Python win32com 中，ref 参数（Errors, Warnings）应该省略
+                    # OpenDoc6 只传前4个参数，Errors 和 Warnings 会作为返回值的一部分
+
+                    # 尝试作为零件打开
+                    try:
+                        comp_doc = self.sw_app.OpenDoc6(
+                            comp_path,  # FileName
+                            1,  # Type:  swDocPART
+                            1,  # Options:  swOpenDocOptions_Silent
+                            ""  # Configuration
+                            # ← Errors 和 Warnings 参数省略！
+                        )
+                    except Exception as e:
+                        print(f"         ⚠ 作为零件打开失败:  {e}")
+
+                    # 如果失败，尝试作为装配打开
+                    if not comp_doc:
+                        try:
+                            comp_doc = self.sw_app.OpenDoc6(
+                                comp_path,
+                                2,  # Type: swDocASSEMBLY
+                                1,
+                                ""
+                            )
+                        except Exception as e:
+                            print(f"         ⚠ 作为装配打开失败: {e}")
+
+                    if not comp_doc:
+                        print(f"         ⚠ 无法打开组件文档")
+                        continue
+
+                    # 生成STEP文件名
+                    step_filename = f"{base_name_normalized}_bom_v1.step"
+                    step_path = os.path.join(output_dir, step_filename)
+
+                    # 清除选择
+                    try:
+                        comp_doc.ClearSelection2(True)
+                    except:
+                        pass
+
+                    # 导出STEP
+                    success = comp_doc.SaveAs3(
+                        step_path,
+                        0,
+                        0
+                    )
+
+                    # 关闭文档
+                    try:
+                        self.sw_app.CloseDoc(comp_path)
+                    except:
+                        pass
+
+                    if success and os.path.exists(step_path):
+                        file_size = os.path.getsize(step_path)
+                        print(f"         ✅ 已导出: {step_filename} ({file_size: ,} bytes)")
+                        exported[base_name_normalized] = step_path
+                        exported_parts.add(base_name_normalized)
+                    else:
+                        print(f"         ⚠ 导出失败")
+
+                except Exception as e:
+                    print(f"         ⚠ 异常:  {e}")
+                    continue
+
+            print(f"\n{'=' * 70}")
+            print(f"✅ 批量导出完成: {len(exported)} 个零件")
+            print(f"{'=' * 70}\n")
+
+            return exported
+
+        except Exception as e:
+            print(f"❌ 批量导出失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return exported
+
+    def run_macro(self, macro_path: str, module_name: str, procedure_name: str) -> bool:
+        """
+        运行SolidWorks宏（基于SolidWorks 2022 API官方文档）
+
+        官方文档：
+        bool RunMacro2(
+            string FilePathName,
+            string ModuleName,
+            string ProcedureName,
+            int Options,
+            ref int Error
+        )
+
+        Args:
+            macro_path: 宏文件路径 (. swp)
+            module_name: 模块名称（通常是 "Macro1"）
+            procedure_name: 过程名称（如 "main"）
+
+        Returns:
+            是否成功执行
+        """
+        if not self.sw_app:
+            print("⚠ SolidWorks未初始化")
+            return False
+
+        if not os.path.exists(macro_path):
+            print(f"⚠ 宏文件不存在: {macro_path}")
+            return False
+
+        try:
+            print(f"   🔧 运行宏: {os.path.basename(macro_path)}")
+            print(f"      模块: {module_name}")
+            print(f"      过程: {procedure_name}")
+
+            # ✅ 根据官方文档，RunMacro2 需要5个参数
+            # 在 Python win32com 中，ref 参数需要使用 VARIANT 包装
+
+            import pythoncom
+            from win32com.client import VARIANT
+
+            # 创建一个 VARIANT 用于接收 Error 参数
+            error_code = VARIANT(pythoncom.VT_I4 | pythoncom.VT_BYREF, 0)
+
+            # Options 枚举值：
+            # swRunMacroDefault = 0
+            # swRunMacroUnloadAfterRun = 1
+            options = 1  # swRunMacroUnloadAfterRun（执行后卸载，避免内存问题）
+
+            success = self.sw_app.RunMacro2(
+                macro_path,  # FilePathName
+                module_name,  # ModuleName
+                procedure_name,  # ProcedureName
+                options,  # Options
+                error_code  # Error (ref parameter)
+            )
+
+            if success:
+                print(f"   ✓ 宏执行成功")
+                return True
+            else:
+                error_val = error_code.value if hasattr(error_code, 'value') else 0
+                print(f"   ⚠ 宏执行失败，错误码: {error_val}")
+                return False
+
+        except Exception as e:
+            print(f"   ❌ 运行宏异常: {e}")
+            import traceback
+            traceback.print_exc()
+            return False

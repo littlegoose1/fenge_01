@@ -5,14 +5,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="3bc9585e-2f83-4858-b9c1-31eb8dede24b" name="更改" comment="人体装配">
-      <change afterPath="$PROJECT_DIR$/src/services/assembly_viewer_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/services/part_visualizer.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/services/solidworks_bom_extractor_auto.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/services/solidworks_bom_extractor_official.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/services/step_bom_extractor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/ExportAllComponentsToSTEP.swp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/controller/app_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/controller/app_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/db/persistence_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/db/persistence_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/assembly_import_service_bom.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/assembly_import_service_bom.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/solidworks_bom_extractor_auto.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/solidworks_bom_extractor_auto.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/view/equipment_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/view/equipment_panel.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/view/main_window.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/view/main_window.py" afterDir="false" />
     </list>
@@ -68,37 +66,38 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Python.__init__.executor&quot;: &quot;Debug&quot;,
-    &quot;Python.dbtest.executor&quot;: &quot;Run&quot;,
-    &quot;Python.demo_build_assembly.executor&quot;: &quot;Run&quot;,
-    &quot;Python.demo_cooperative_deformation.executor&quot;: &quot;Debug&quot;,
-    &quot;Python.dev_reset.executor&quot;: &quot;Run&quot;,
-    &quot;Python.main.executor&quot;: &quot;Run&quot;,
-    &quot;Python.main_window.executor&quot;: &quot;Run&quot;,
-    &quot;Python.occ_viewer.executor&quot;: &quot;Debug&quot;,
-    &quot;Python.outbox_worker.executor&quot;: &quot;Run&quot;,
-    &quot;Python.project_to_neo4j.executor&quot;: &quot;Run&quot;,
-    &quot;Python.solve_assembly.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test_import.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test_solidworks_connection.executor&quot;: &quot;Run&quot;,
-    &quot;Python.text_xcaf_minimal.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/pycharm/cad_geometry_editor&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.__init__.executor": "Debug",
+    "Python.dbtest.executor": "Run",
+    "Python.demo_build_assembly.executor": "Run",
+    "Python.demo_cooperative_deformation.executor": "Debug",
+    "Python.dev_reset.executor": "Run",
+    "Python.main.executor": "Run",
+    "Python.main_window.executor": "Run",
+    "Python.occ_viewer.executor": "Debug",
+    "Python.outbox_worker.executor": "Run",
+    "Python.project_to_neo4j.executor": "Run",
+    "Python.solve_assembly.executor": "Run",
+    "Python.test_import.executor": "Run",
+    "Python.test_macro.executor": "Run",
+    "Python.test_solidworks_connection.executor": "Run",
+    "Python.text_xcaf_minimal.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "git-widget-placeholder": "main",
+    "ignore.virus.scanning.warn.message": "true",
+    "last_opened_file_path": "D:/pycharm/cad_geometry_editor",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
       <recent name="D:\pycharm\cad_geometry_editor\src\services" />
@@ -152,29 +151,6 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="main_window" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
-      <module name="cad_geometry_editor" />
-      <option name="ENV_FILES" value="" />
-      <option name="INTERPRETER_OPTIONS" value="" />
-      <option name="PARENT_ENVS" value="true" />
-      <envs>
-        <env name="PYTHONUNBUFFERED" value="1" />
-      </envs>
-      <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/src/view" />
-      <option name="IS_MODULE_SDK" value="true" />
-      <option name="ADD_CONTENT_ROOTS" value="true" />
-      <option name="ADD_SOURCE_ROOTS" value="true" />
-      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/src/view/main_window.py" />
-      <option name="PARAMETERS" value="" />
-      <option name="SHOW_COMMAND_LINE" value="false" />
-      <option name="EMULATE_TERMINAL" value="false" />
-      <option name="MODULE_MODE" value="false" />
-      <option name="REDIRECT_INPUT" value="false" />
-      <option name="INPUT_FILE" value="" />
-      <method v="2" />
-    </configuration>
     <configuration name="test_import" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="cad_geometry_editor" />
       <option name="ENV_FILES" value="" />
@@ -190,6 +166,29 @@
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/test_import.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="test_macro" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="cad_geometry_editor" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/scripts" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/scripts/test_macro.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -246,11 +245,11 @@
     </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.test_macro" />
         <item itemvalue="Python.test_solidworks_connection" />
         <item itemvalue="Python.demo_cooperative_deformation" />
         <item itemvalue="Python.text_xcaf_minimal" />
         <item itemvalue="Python.test_import" />
-        <item itemvalue="Python.main_window" />
       </list>
     </recent_temporary>
   </component>
@@ -340,7 +339,9 @@
       <workItem from="1767871287913" duration="4706000" />
       <workItem from="1767876419014" duration="13977000" />
       <workItem from="1767934470951" duration="4088000" />
-      <workItem from="1768097992242" duration="4246000" />
+      <workItem from="1768097992242" duration="7067000" />
+      <workItem from="1768107471515" duration="6504000" />
+      <workItem from="1768230041540" duration="5823000" />
     </task>
     <task id="LOCAL-00001" summary="1">
       <option name="closed" value="true" />
@@ -438,7 +439,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767871363111</updated>
     </task>
-    <option name="localTasksCounter" value="13" />
+    <task id="LOCAL-00013" summary="人体装配">
+      <option name="closed" value="true" />
+      <created>1768102331328</created>
+      <option name="number" value="00013" />
+      <option name="presentableId" value="LOCAL-00013" />
+      <option name="project" value="LOCAL" />
+      <updated>1768102331328</updated>
+    </task>
+    <option name="localTasksCounter" value="14" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -554,6 +563,7 @@
     <SUITE FILE_PATH="coverage/cad_geometry_editor$occ_viewer.coverage" NAME="occ_viewer 覆盖结果" MODIFIED="1749021792141" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/src/view" />
     <SUITE FILE_PATH="coverage/cad_geometry_editor$__init__.coverage" NAME="__init__ 覆盖结果" MODIFIED="1749020354272" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/src/controller" />
     <SUITE FILE_PATH="coverage/cad_geometry_editor$project_to_neo4j.coverage" NAME="project_to_neo4j 覆盖结果" MODIFIED="1761216462532" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
+    <SUITE FILE_PATH="coverage/cad_geometry_editor$test_macro.coverage" NAME="test_macro 覆盖结果" MODIFIED="1768235807244" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/cad_geometry_editor$demo_build_assembly.coverage" NAME="demo_build_assembly 覆盖结果" MODIFIED="1761376106206" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/cad_geometry_editor$solve_assembly.coverage" NAME="solve_assembly 覆盖结果" MODIFIED="1761376159828" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/cad_geometry_editor$main_window.coverage" NAME="main_window 覆盖结果" MODIFIED="1761380101750" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/src/view" />
@@ -562,6 +572,6 @@
     <SUITE FILE_PATH="coverage/cad_geometry_editor$dbtest.coverage" NAME="dbtest 覆盖结果" MODIFIED="1761209393531" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/cad_geometry_editor$text_xcaf_minimal.coverage" NAME="text_xcaf_minimal 覆盖结果" MODIFIED="1762604637657" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/cad_geometry_editor$outbox_worker.coverage" NAME="outbox_worker 覆盖结果" MODIFIED="1761375965053" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
-    <SUITE FILE_PATH="coverage/cad_geometry_editor$main.coverage" NAME="main 覆盖结果" MODIFIED="1768102128805" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/cad_geometry_editor$main.coverage" NAME="main 覆盖结果" MODIFIED="1768235884752" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
   </component>
 </project>

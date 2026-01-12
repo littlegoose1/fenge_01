@@ -124,6 +124,9 @@ class ApplicationController(QObject):
         self.main_window.assembly_selected. connect(self.on_assembly_selected)
         self.main_window.node_selected.connect(self.on_node_selected)
 
+        # ✅ 连接加载零件进行分割的信号
+        self.main_window.load_part_for_segmentation_requested.connect(self.load_part_for_segmentation)
+
         # ✅ 启动后延迟加载装配列表
         QTimer.singleShot(500, self.refresh_assemblies)
 
@@ -405,8 +408,7 @@ class ApplicationController(QObject):
             assembly_description=description
         )
 
-        # 打印摘要
-        self.assembly_importer_bom.print_import_summary(result)
+
 
         return result
 
@@ -875,3 +877,211 @@ class ApplicationController(QObject):
             print(f"⚠️ 高亮部件失败: {e}")
             import traceback
             traceback.print_exc()
+
+    def _resolve_step_path(self, step_uri: str) -> Optional[str]:
+        """解析STEP文件路径（支持多种URI格式）"""
+        if not step_uri:
+            return None
+
+        # ✅ 处理各种 URI 格式
+        if step_uri.startswith('file:///'):
+            # file:///D:/path/to/file. step
+            step_path = step_uri[8:]
+        elif step_uri.startswith('file://'):
+            # ✅ 您的格式:  file://D:/solidworks/step/Barrel_bom_v1.step
+            step_path = step_uri[7:]
+        elif step_uri.startswith('file:'):
+            # file:/path/to/file.step
+            step_path = step_uri[5:]
+        else:
+            step_path = step_uri
+
+        # ✅ Windows路径处理：将正斜杠转换为反斜杠
+        step_path = step_path.replace('/', os.sep)
+
+        print(f"[DEBUG] 解析URI: {step_uri}")
+        print(f"[DEBUG] 转换后路径: {step_path}")
+        print(f"[DEBUG] 文件存在: {os.path.exists(step_path)}")
+
+        # 如果路径不存在，尝试在EXPORT_DIR中查找
+        if not os.path.exists(step_path):
+            filename = os.path.basename(step_path)
+            export_dir = os.getenv("EXPORT_DIR", "exports")
+            alternative_path = os.path.join(export_dir, filename)
+
+            print(f"[DEBUG] 原路径不存在，尝试:  {alternative_path}")
+
+            if os.path.exists(alternative_path):
+                print(f"[DEBUG] ✅ 找到替代路径")
+                return alternative_path
+
+            return None
+
+        return step_path
+
+    def _export_part_from_database(self, part_version_id: str) -> Optional[str]:
+        """从数据库导出零件STEP文件"""
+        try:
+            from ..db.mysql import get_conn
+            from ..db.util import uuid_to_bin
+
+            # 查询零件的几何数据
+            sql = """
+                  SELECT p.`key` as part_key, \
+                         p.name  as part_name, \
+                         pv.version_no, \
+                         ga.uri  as step_uri, \
+                         ga.data as step_data
+                  FROM part_versions pv
+                           JOIN parts p ON pv.part_id = p.id
+                           LEFT JOIN geom_assets ga ON pv.cad_asset_id = ga.id
+                  WHERE pv.id = %s \
+                  """
+
+            conn = get_conn()
+            cur = conn.cursor(dictionary=True)
+            try:
+                cur.execute(sql, (uuid_to_bin(part_version_id),))
+                row = cur.fetchone()
+
+                if not row:
+                    print(f"⚠️ 未找到零件版本:  {part_version_id}")
+                    return None
+
+                part_name = row['part_name']
+                version_no = row['version_no']
+
+                print(f"[DEBUG] 零件: {part_name}, 版本: {version_no}")
+
+                # ✅ 策略1: 优先使用数据库中存储的URI
+                if row.get('step_uri'):
+                    print(f"[DEBUG] 数据库URI: {row['step_uri']}")
+                    original_path = self._resolve_step_path(row['step_uri'])
+                    if original_path and os.path.exists(original_path):
+                        print(f"✅ 使用数据库路径: {original_path}")
+                        return original_path
+                    else:
+                        print(f"⚠️ 数据库路径不存在:  {original_path}")
+
+                # ✅ 策略2: 如果有BLOB数据，导出到文件
+                if row.get('step_data'):
+                    export_dir = os.getenv("EXPORT_DIR", "exports")
+                    os.makedirs(export_dir, exist_ok=True)
+
+                    # ✅ 使用与数据库一致的命名格式
+                    filename = f"{part_name}_bom_v{version_no}.step"
+                    output_path = os.path.join(export_dir, filename)
+
+                    # 写入文件
+                    with open(output_path, 'wb') as f:
+                        f.write(row['step_data'])
+
+                    print(f"✅ 从数据库BLOB导出:  {output_path}")
+                    return output_path
+
+                print(f"⚠️ 零件没有可用的STEP文件")
+                return None
+
+            finally:
+                cur.close()
+                conn.close()
+
+        except Exception as e:
+            print(f"⚠️ 从数据库导出零件失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    @Slot(str, str)
+    def load_part_for_segmentation(self, part_version_id: str, step_uri: str):
+        """加载零件进行几何分割"""
+        try:
+            print(f"\n{'=' * 60}")
+            print(f"[加载零件] 开始")
+            print(f"  零件版本ID: {part_version_id}")
+            print(f"  STEP URI: {step_uri}")
+            print(f"{'=' * 60}\n")
+
+            self.main_window.set_status("正在加载零件...")
+
+            # 1. 解析STEP文件路径
+            step_path = self._resolve_step_path(step_uri)
+
+            if not step_path or not os.path.exists(step_path):
+                # 文件不存在 - 尝试从数据库重新导出
+                print(f"⚠️ STEP文件不存在，尝试从数据库导出...")
+                self.main_window.set_status("STEP文件不存在，正在从数据库重新导出...")
+                step_path = self._export_part_from_database(part_version_id)
+
+                if not step_path:
+                    error_msg = (
+                        f"❌ STEP文件未找到且无法从数据库导出\n\n"
+                        f"原URI: {step_uri}\n"
+                        f"解析后路径: {self._resolve_step_path(step_uri) or '无'}\n\n"
+                        f"可能原因:\n"
+                        f"• 文件已被移动或删除\n"
+                        f"• 数据库中没有几何数据\n"
+                        f"• 路径格式不正确\n\n"
+                        f"建议:\n"
+                        f"• 检查文件是否存在:  D:\\solidworks\\step\\\n"
+                        f"• 检查 . env 中的 EXPORT_DIR 配置\n"
+                        f"• 重新导入装配"
+                    )
+                    self.main_window.show_error("无法加载零件", error_msg)
+                    return
+
+            print(f"✅ 找到STEP文件: {step_path}")
+            self.main_window.set_status(f"加载零件:  {os.path.basename(step_path)}")
+
+            # 2. 加载STEP文件
+            print(f"[加载STEP] {step_path}")
+            shape = self.io_handler.load_step_model(step_path)
+            print(f"✅ STEP文件加载成功")
+
+            # 3. 几何分割
+            print(f"[几何分割] 开始处理...")
+            self.main_window.set_status("正在分割几何体...")
+            self.primitives = self.processor.process_shape(shape)
+            print(f"✅ 识别出 {len(self.primitives)} 个几何体")
+
+            # 4. 清空修改历史
+            self.modified_shapes.clear()
+            self.preview_shapes.clear()
+            self.current_file_path = step_path
+
+            # 5. 显示结果
+            self.main_window.set_primitives(self.primitives)
+
+            # 6. 更新状态
+            success_msg = (
+                f"✅ 已加载并分割零件:  {os.path.basename(step_path)}\n"
+                f"识别出 {len(self.primitives)} 个几何体"
+            )
+            self.main_window.set_status(success_msg)
+            print(f"\n{success_msg}\n")
+
+            # 7. 显示提示
+            self.main_window.show_info(
+                "零件已加载",
+                f"✅ 零件已成功加载并分割\n\n"
+                f"📁 文件:  {os.path.basename(step_path)}\n"
+                f"🔧 识别的几何体: {len(self.primitives)} 个\n\n"
+                f"💡 您现在可以:\n"
+                f"  • 在左侧几何体列表中选择几何体\n"
+                f"  • 在右侧参数面板中调整参数\n"
+                f"  • 点击'应用修改'保存更改\n"
+                f"  • 使用'文件 → 保存为STEP'导出修改后的零件"
+            )
+
+            print(f"{'=' * 60}")
+            print(f"[加载零件] 完成")
+            print(f"{'=' * 60}\n")
+
+        except Exception as e:
+            error_msg = f"加载零件失败:\n{str(e)}"
+            self.main_window.show_error("加载失败", error_msg)
+            self.main_window.set_status("❌ 加载零件失败")
+            print(f"\n❌ 错误: {error_msg}\n")
+            import traceback
+            traceback.print_exc()
+
