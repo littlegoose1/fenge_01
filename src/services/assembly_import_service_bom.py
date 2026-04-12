@@ -31,7 +31,7 @@ class AssemblyImportServiceBOM:
             assembly_name: Optional[str] = None,
             assembly_description: Optional[str] = None
     ) -> Dict[str, Any]:
-        """从装配文件导入并基于BOM入库（使用宏批量导出STEP）"""
+        """从装配文件导入并基于BOM入库（使用SolidWorks宏批量导出STEP）"""
 
         print("\n" + "=" * 70)
         print("📦 基于BOM的装配导入（使用SolidWorks宏批量导出）")
@@ -46,7 +46,7 @@ class AssemblyImportServiceBOM:
         bom_extractor = SolidWorksBOMExtractorAuto()
 
         try:
-            # 1. 启动SolidWorks并打开文件
+            # ========== 1. 启动SolidWorks并打开文件 ==========
             print("🚀 启动SolidWorks...")
             if not bom_extractor.start_solidworks(visible=False):
                 raise RuntimeError("无法启动SolidWorks")
@@ -55,9 +55,11 @@ class AssemblyImportServiceBOM:
             if not bom_extractor.open_assembly(sldasm_path):
                 raise RuntimeError("无法打开装配文件")
 
-            # 2. 提取BOM
+            # ========== 2. 提取BOM ==========
             print("\n📋 提取BOM...")
             bom_items = bom_extractor.extract_bom()
+            instance_rows = bom_extractor.extract_instances(top_level_only=False)
+            print(f"✓ 实例位姿数: {len(instance_rows)}")
 
             if not bom_items:
                 raise RuntimeError("BOM为空，无法导入")
@@ -65,63 +67,127 @@ class AssemblyImportServiceBOM:
             total_qty = sum(item.quantity for item in bom_items)
             print(f"✓ 提取到 {len(bom_items)} 种零件，共 {total_qty} 个实例")
 
-            # ✅ 3. 使用宏批量导出所有零件
+            # ========== 3. 使用宏批量导出所有零件 ==========
             export_dir = os.getenv("EXPORT_DIR", "D:\\solidworks\\step")
             os.makedirs(export_dir, exist_ok=True)
 
             print(f"\n📤 使用SolidWorks宏批量导出零件到:  {export_dir}")
 
-            # ✅ 修复：正确构建宏文件路径
-            current_dir = os.path.dirname(os.path.abspath(__file__))  # src/services/
-            project_root = os.path.dirname(os.path.dirname(current_dir))  # 项目根目录
+            # 构建宏文件路径
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(os.path.dirname(current_dir))
             macro_path = os.path.join(project_root, "scripts", "ExportAllComponentsToSTEP.swp")
 
-            # 调试输出
-            print(f"   当前文件:  {__file__}")
-            print(f"   当前目录: {current_dir}")
-            print(f"   项目根目录: {project_root}")
-            print(f"   宏文件路径:  {macro_path}")
+            print(f"   宏文件路径: {macro_path}")
             print(f"   宏文件存在: {os.path.exists(macro_path)}")
 
             exported_files = {}
 
             if os.path.exists(macro_path):
                 # 运行宏
-                print(f"   🔧 准备运行宏...")
+                print(f"   🔧 运行宏...")
                 success = bom_extractor.run_macro(
                     macro_path,
-                    "Macro1",  # ✅ 修改：使用 SolidWorks 默认的模块名
-                    "main"  # 过程名
+                    "ExportAllComponentsToSTEP1",
+                    "main"
                 )
+
                 if success:
-                    print(f"   ✓ 宏执行成功")
+                    print(f"   ✓ 宏调用成功")
 
-                    # 等待文件生成
+                    # ✅ 优化：监控STEP文件生成（而不是等待标记文件）
                     import time
-                    print(f"   ⏳ 等待文件生成 (3秒)...")
-                    time.sleep(3)
+                    max_wait = 120  # 最多等待120秒
+                    check_interval = 2  # 每2秒检查一次
+                    elapsed = 0
+                    expected_count = len(bom_items)
 
-                    # 扫描导出的文件
-                    print(f"   🔍 扫描导出的STEP文件...")
-                    for item in bom_items:
-                        part_key = self._normalize_part_key(item.part_name)
-                        step_file = os.path.join(export_dir, f"{part_key}_bom_v1.step")
-                        if os.path.exists(step_file):
-                            file_size = os.path.getsize(step_file)
-                            print(f"      ✓ 找到: {part_key}_bom_v1.step ({file_size: ,} bytes)")
-                            exported_files[part_key] = step_file
+                    print(f"   ⏳ 等待STEP文件生成 (需要 {expected_count} 个文件)...")
+
+                    last_count = 0
+                    stable_count = 0  # 文件数量稳定的次数
+
+                    while elapsed < max_wait:
+                        # 扫描当前已生成的STEP文件
+                        current_files = {}
+                        for item in bom_items:
+                            part_key = self._normalize_part_key(item.part_name)
+                            step_file = os.path.join(export_dir, f"{part_key}_bom_v1.step")
+                            if os.path.exists(step_file):
+                                # 检查文件大小（确保写入完成）
+                                file_size = os.path.getsize(step_file)
+                                if file_size > 1000:  # 至少1KB，避免空文件
+                                    current_files[part_key] = step_file
+
+                        current_count = len(current_files)
+
+                        # 检查是否所有文件都已生成
+                        if current_count == expected_count:
+                            print(f"   ✅ 所有STEP文件生成完成！(耗时 {elapsed:.1f} 秒)")
+                            exported_files = current_files
+                            break
+
+                        # 检查文件数量是否稳定（连续3次检查数量不变）
+                        if current_count == last_count and current_count > 0:
+                            stable_count += 1
+                            if stable_count >= 3:  # 6秒内数量不变，认为完成
+                                print(f"   ⚠️ 文件生成似乎已完成，但只有 {current_count}/{expected_count} 个文件")
+                                exported_files = current_files
+                                break
                         else:
-                            print(f"      ✗ 未找到: {part_key}_bom_v1.step")
+                            stable_count = 0
 
-                    print(f"\n   ✅ 共找到 {len(exported_files)}/{len(bom_items)} ��STEP文件")
+                        last_count = current_count
+
+                        # 显示进度
+                        if int(elapsed) % 10 == 0:
+                            if elapsed == 0:
+                                print(f"      等待中...  {current_count}/{expected_count} 文件")
+                            else:
+                                print(f"      进度: {current_count}/{expected_count} 文件，已等待 {elapsed:.0f} 秒")
+
+                        time.sleep(check_interval)
+                        elapsed += check_interval
+                    else:
+                        # 超时，使用已找到的文件
+                        print(f"   ⚠️ 等待超时，已找到 {current_count}/{expected_count} 个文件")
+                        exported_files = current_files
+
+                    # 额外等待1秒，确保文件系统同步
+                    time.sleep(1)
+
+                    # 显示详细信息
+                    if exported_files:
+                        print(f"\n   📋 STEP文件详情:")
+                        for i, (key, path) in enumerate(sorted(exported_files.items()), 1):
+                            if i <= 5:  # 只显示前5个
+                                file_size = os.path.getsize(path)
+                                print(f"      [{i}] {key}_bom_v1.step ({file_size:,} bytes)")
+
+                        if len(exported_files) > 5:
+                            print(f"      ...  还有 {len(exported_files) - 5} 个文件")
+
+                        print(f"\n   ✅ 共找到 {len(exported_files)}/{expected_count} 个STEP文件")
+                    else:
+                        print(f"\n   ❌ 未找到任何STEP文件")
+
+                    if len(exported_files) < expected_count:
+                        missing = []
+                        for item in bom_items:
+                            part_key = self._normalize_part_key(item.part_name)
+                            if part_key not in exported_files:
+                                missing.append(part_key)
+                        if missing:
+                            print(f"   ⚠️ 缺失的零件:  {', '.join(missing[: 3])}" +
+                                  (f" ...  还有 {len(missing) - 3} 个" if len(missing) > 3 else ""))
+
                 else:
                     print(f"   ⚠ 宏执行失败，将使用占位立方体")
             else:
-                print(f"   ❌ 未找到宏文件: {macro_path}")
-                print(f"   请确保文件存在于项目的 scripts 目录下")
+                print(f"   ❌ 未找到宏文件:  {macro_path}")
                 print(f"   将使用占位立方体继续导入")
 
-            # 4. 创建装配记录
+            # ========== 4. 创建装配记录 ==========
             print(f"\n💾 创建装配记录...")
             assembly_id = self._create_assembly_record(
                 assembly_name,
@@ -131,21 +197,23 @@ class AssemblyImportServiceBOM:
             )
             print(f"✓ 装配ID: {assembly_id[: 8]}...")
 
-            # 5. 导入零件版本（传递导出的文件字典）
+            # ========== 5. 导入零件版本 ==========
             print(f"\n📦 导入零件版本...")
             part_versions = self._import_part_versions(bom_items, exported_files)
             print(f"✓ 共处理 {len(part_versions)} 种零件版本")
 
-            # 6. 创建装配节点
+            # ========== 6. 创建装配节点 ==========
             print(f"\n🔗 创建装配节点...")
+            # 在 import_assembly_from_bom() 中（替换你原来的创建节点调用）
             node_count = self._create_assembly_nodes(
-                assembly_id,
-                bom_items,
-                part_versions
+                assembly_id=assembly_id,
+                bom_items=bom_items,
+                part_versions=part_versions,
+                instance_rows=instance_rows
             )
             print(f"✓ 创建 {node_count} 个装配节点")
 
-            # 7. 返回结果
+            # ========== 7. 返回结果 ==========
             result = {
                 'success': True,
                 'assembly_id': assembly_id,
@@ -406,16 +474,37 @@ class AssemblyImportServiceBOM:
             conn.close()
 
     def _create_assembly_nodes(
-        self,
-        assembly_id: str,
-        bom_items:  List[SWBOMItem],
-        part_versions: Dict[str, Dict[str, Any]]
+            self,
+            assembly_id: str,
+            bom_items: List[SWBOMItem],
+            part_versions: Dict[str, Dict[str, Any]],
+            instance_rows: List[Dict[str, Any]]
     ) -> int:
-        """创建装配节点"""
+        """?????????? part+configuration ???????"""
 
         conn = get_conn()
         cur = conn.cursor()
         node_count = 0
+
+        # (part_key, configuration) -> ????
+        # ???? (part_key, None) ??????
+        bucket: Dict[tuple, List[Dict[str, Any]]] = {}
+        for r in instance_rows:
+            part_key = self._normalize_part_key(r.get("part_name", ""))
+            cfg = (r.get("configuration") or "Default").strip()
+            bucket.setdefault((part_key, cfg), []).append(r)
+            bucket.setdefault((part_key, None), []).append(r)
+
+        # ????? key ????
+        ptr: Dict[tuple, int] = {k: 0 for k in bucket.keys()}
+
+        def identity16() -> List[float]:
+            return [
+                1.0, 0.0, 0.0, 0.0,
+                0.0, 1.0, 0.0, 0.0,
+                0.0, 0.0, 1.0, 0.0,
+                0.0, 0.0, 0.0, 1.0
+            ]
 
         try:
             for item in bom_items:
@@ -423,28 +512,41 @@ class AssemblyImportServiceBOM:
                 part_info = part_versions.get(part_key)
 
                 if not part_info:
-                    print(f"  ⚠ 跳过零件（未找到版本）: {item.part_name}")
+                    print(f"  ? ???????????: {item.part_name}")
                     continue
 
-                # 为每个实例创建节点
-                for instance_idx in range(item.quantity):
+                for i in range(item.quantity):
                     node_id = new_uuid()
-                    node_name = f"{item.part_name}-{instance_idx + 1}"
+                    node_name = f"{item.part_name}-{i + 1}"
+                    m16 = identity16()
 
-                    # 默认变换（单位矩阵）
-                    transform_json = json.dumps([
-                        1, 0, 0, 0,
-                        0, 1, 0, 0,
-                        0, 0, 1, 0,
-                        0, 0, 0, 1
-                    ])
+                    key_exact = (part_key, (item.configuration or "Default").strip())
+                    key_fallback = (part_key, None)
+
+                    rows_exact = bucket.get(key_exact, [])
+                    if rows_exact:
+                        use_key = key_exact
+                        rows = rows_exact
+                    else:
+                        use_key = key_fallback
+                        rows = bucket.get(key_fallback, [])
+
+                    p = ptr.get(use_key, 0)
+                    if p < len(rows):
+                        rec = rows[p]
+                        ptr[use_key] = p + 1
+                        node_name = rec.get("instance_name", node_name)
+                        mm = rec.get("transform_matrix")
+                        if isinstance(mm, list) and len(mm) == 16:
+                            m16 = [float(v) for v in mm]
+
+                    transform_json = json.dumps({"matrix": m16}, ensure_ascii=False)
 
                     sql = """
-                        INSERT INTO assembly_nodes
-                        (id, assembly_id, part_version_id, name, transform_json)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """
-
+                          INSERT INTO assembly_nodes
+                              (id, assembly_id, part_version_id, name, transform_json)
+                          VALUES (%s, %s, %s, %s, %s)
+                          """
                     cur.execute(sql, (
                         uuid_to_bin(node_id),
                         uuid_to_bin(assembly_id),

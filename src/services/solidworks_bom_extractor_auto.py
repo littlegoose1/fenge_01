@@ -882,3 +882,140 @@ class SolidWorksBOMExtractorAuto:
             import traceback
             traceback.print_exc()
             return False
+
+    def extract_instances(self, top_level_only: bool = False) -> List[Dict[str, Any]]:
+        """
+        提取每个组件实例信息（不聚合），用于装配节点入库写 transform。
+        返回:
+        [
+          {
+            "instance_name": str,
+            "part_name": str,
+            "configuration": str,
+            "transform_matrix": [16 float]
+          }
+        ]
+        """
+        if not self.assy_doc:
+            raise RuntimeError("未连接到装配文档")
+
+        components = self.assy_doc.GetComponents(top_level_only)
+        if not components:
+            print("⚠️ 未找到组件实例")
+            return []
+
+        instances: List[Dict[str, Any]] = []
+
+        for idx, comp in enumerate(components, 1):
+            try:
+                instance_name = self._get_component_full_name(comp, idx)
+                part_name = self._extract_part_name_from_instance(instance_name)
+                config_name = self._get_component_config(comp)
+                m16 = self._get_component_transform_matrix16(comp)
+
+                instances.append({
+                    "instance_name": instance_name,
+                    "part_name": part_name,
+                    "configuration": config_name,
+                    "transform_matrix": m16
+                })
+            except Exception as e:
+                print(f"⚠️ 提取实例失败 idx={idx}: {e}")
+                continue
+
+        print(f"✅ 实例提取完成: {len(instances)}")
+        return instances
+
+    @staticmethod
+    def _identity_matrix16() -> List[float]:
+        return [
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 1.0
+        ]
+
+    @staticmethod
+    def _get_component_full_name(comp, idx: int) -> str:
+        name = f"Component_{idx}"
+        try:
+            if hasattr(comp, "Name2"):
+                name = str(comp.Name2)
+        except Exception:
+            pass
+        if name == f"Component_{idx}":
+            try:
+                if hasattr(comp, "Name"):
+                    name = str(comp.Name)
+            except Exception:
+                pass
+        return name
+
+    @staticmethod
+    def _extract_part_name_from_instance(instance_name: str) -> str:
+        part_name = instance_name
+        if "-" in instance_name:
+            parts = instance_name.rsplit("-", 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                part_name = parts[0]
+        return part_name
+
+    @staticmethod
+    def _get_component_config(comp) -> str:
+        cfg = "Default"
+        try:
+            if hasattr(comp, "ReferencedConfiguration"):
+                cfg = str(comp.ReferencedConfiguration)
+        except Exception:
+            pass
+        return cfg
+
+    def _get_component_transform_matrix16(self, comp) -> List[float]:
+        """
+        ???????????????? 4x4 ??? 16 ????
+        ?? Transform2.ArrayData ? 12/16 ???
+        """
+        try:
+            tr = getattr(comp, "Transform2", None)
+            if tr is None:
+                return self._identity_matrix16()
+
+            arr = None
+            try:
+                arr = list(tr.ArrayData)
+            except Exception:
+                arr = None
+
+            if arr:
+                # ??? SolidWorks ??(m)?? mm???? STEP(mm) ???????
+                t_scale = float(os.getenv("SW_TRANSFORM_TRANSLATION_SCALE", "1000"))
+
+                # SolidWorks 16 ????0..8 ??, 9..11 ??, 12 ??, 13..15 ???
+                if len(arr) >= 16:
+                    r11, r12, r13 = float(arr[0]), float(arr[1]), float(arr[2])
+                    r21, r22, r23 = float(arr[3]), float(arr[4]), float(arr[5])
+                    r31, r32, r33 = float(arr[6]), float(arr[7]), float(arr[8])
+                    tx, ty, tz = float(arr[9]) * t_scale, float(arr[10]) * t_scale, float(arr[11]) * t_scale
+                    return [
+                        r11, r12, r13, tx,
+                        r21, r22, r23, ty,
+                        r31, r32, r33, tz,
+                        0.0, 0.0, 0.0, 1.0
+                    ]
+
+                # 12 ????r11..r33, tx,ty,tz
+                if len(arr) >= 12:
+                    r11, r12, r13 = float(arr[0]), float(arr[1]), float(arr[2])
+                    r21, r22, r23 = float(arr[3]), float(arr[4]), float(arr[5])
+                    r31, r32, r33 = float(arr[6]), float(arr[7]), float(arr[8])
+                    tx, ty, tz = float(arr[9]) * t_scale, float(arr[10]) * t_scale, float(arr[11]) * t_scale
+                    return [
+                        r11, r12, r13, tx,
+                        r21, r22, r23, ty,
+                        r31, r32, r33, tz,
+                        0.0, 0.0, 0.0, 1.0
+                    ]
+
+            return self._identity_matrix16()
+        except Exception:
+            return self._identity_matrix16()

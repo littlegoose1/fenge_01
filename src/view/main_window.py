@@ -9,13 +9,14 @@ from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QLabel,
                                QStatusBar, QMessageBox, QGroupBox, QFormLayout,
                                QDoubleSpinBox, QPushButton, QToolBar,
                                QCheckBox, QDialog, QTextEdit, QDialogButtonBox,
-                               QComboBox, QLineEdit, QRadioButton,
+                               QComboBox, QLineEdit, QRadioButton, QTabWidget,
                                QStyle, QDockWidget, QTableWidget, QTableWidgetItem, QHeaderView)
 from PySide6.QtCore import Qt, Signal, Slot, QSize
 from PySide6.QtGui import QAction
 
 from OCC.Core.TopoDS import TopoDS_Shape
 from OCC.Display.backend import load_backend
+from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
 
 load_backend("pyside6")
 from OCC.Display.qtDisplay import qtViewer3d
@@ -24,6 +25,7 @@ from .. model.geometry import GeometricPrimitive
 from ..ui.solve_dialog import SolveAssemblyDialog
 from src.view.unity_launcher import UnityLauncherWidget
 from . equipment_panel import EquipmentPanel
+from src.ui.deformation_panel import DeformationPanel
 
 
 # ✅ 优化：验证结果对话框
@@ -230,6 +232,9 @@ class MainWindow(QMainWindow):
     # ✅ 新增：加载零件进行分割
     load_part_for_segmentation_requested = Signal(str, str)  # part_version_id, step_uri
 
+    # ✅ 联动变形信号（可选：用于后续Controller接管）
+    deformation_run_requested = Signal(str, list, dict)  # assembly_id, constraints, params
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("单兵装备数字化设计系统")
@@ -251,6 +256,8 @@ class MainWindow(QMainWindow):
         self.current_assembly_id = ""
 
         self.setup_unity_launcher()
+
+        self.setup_deformation_panel()
 
     def _create_menus(self):
         """✅ 菜单结构（含SolidWorks BOM）"""
@@ -977,33 +984,36 @@ class MainWindow(QMainWindow):
         self.setup_equipment_panel()
 
     def setup_equipment_panel(self):
-        """设置装备展示面板"""
+        """统一管理面板：装备管理 + 联动变形（底部标签切换）"""
+        if hasattr(self, "management_dock"):
+            return
+
         self.equipment_panel = EquipmentPanel()
+        self.deformation_panel = DeformationPanel(on_render=self.render_deformation_result)
 
-        equipment_dock = QDockWidget("装备管理", self)
-        equipment_dock.setWidget(self.equipment_panel)
-        equipment_dock.setAllowedAreas(Qt. LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.management_tabs = QTabWidget()
+        self.management_tabs.setTabPosition(QTabWidget.South)
+        self.management_tabs.addTab(self.equipment_panel, "装备管理")
+        self.management_tabs.addTab(self.deformation_panel, "联动变形")
 
-        features = QDockWidget. DockWidgetMovable | QDockWidget.DockWidgetFloatable
-        equipment_dock.setFeatures(features)
+        self.management_dock = QDockWidget("装配工作台", self)
+        self.management_dock.setWidget(self.management_tabs)
+        self.management_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
 
-        self.addDockWidget(Qt.RightDockWidgetArea, equipment_dock)
+        features = QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable
+        self.management_dock.setFeatures(features)
 
-        # 连接原有信号
-        self.equipment_panel.equipment_selected.connect(self. on_equipment_selected)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.management_dock)
+
+        # Connect existing signals
+        self.equipment_panel.equipment_selected.connect(self.on_equipment_selected)
         self.equipment_panel.equipment_loaded.connect(self.on_equipment_loaded)
 
-        # ✅ 连接装配管理新信号
         self.equipment_panel.assembly_selected.connect(self._on_assembly_selected_from_panel)
         self.equipment_panel.node_selected.connect(self._on_node_selected_from_panel)
         self.equipment_panel.load_assembly_requested.connect(self._on_load_assembly_from_panel)
-
-        # ✅ 添加刷新信号连接
         self.equipment_panel.refresh_assemblies_requested.connect(self._on_refresh_assemblies_from_panel)
-
-        # ✅ 连接加载零件进行分割的信号
         self.equipment_panel.load_part_for_segmentation.connect(self._on_load_part_for_segmentation)
-
 
     def on_equipment_selected(self, equipment_id: str):
         """装备被选中时的回调"""
@@ -1053,6 +1063,92 @@ class MainWindow(QMainWindow):
         """加载零件进行分割（转发信号）"""
         self.load_part_for_segmentation_requested.emit(part_version_id, step_uri)
 
-    def _on_refresh_assemblies_from_panel(self):
-        """刷新装配列表（转发信号）"""
-        self.refresh_assemblies_requested.emit()
+
+    def setup_deformation_panel(self):
+        """兼容旧调用：联动变形已并入统一管理面板。"""
+        if hasattr(self, "management_tabs") and hasattr(self, "deformation_panel"):
+            return
+        self.setup_equipment_panel()
+
+    def render_deformation_result(self, original_nodes, deformed_nodes):
+        """
+        Render deformation result:
+        - Original model: semi-transparent gray
+        - Deformed model: blue
+        - Supports transform in matrix/pos/quat formats
+        """
+        if self.canvas._display is None:
+            return
+
+        try:
+            from OCC.Core.gp import gp_Trsf, gp_Vec, gp_Quaternion
+            from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform
+
+            def normalize_matrix16(matrix):
+                m = [float(v) for v in matrix[:16]]
+                if abs(m[15] - 1.0) < 1e-9:
+                    return m
+                t_scale = float(os.getenv("SW_TRANSFORM_TRANSLATION_SCALE", "1000"))
+                return [
+                    m[0], m[1], m[2], m[9] * t_scale,
+                    m[3], m[4], m[5], m[10] * t_scale,
+                    m[6], m[7], m[8], m[11] * t_scale,
+                    0.0, 0.0, 0.0, 1.0
+                ]
+
+            def apply_transform(shape, tf):
+                tr = gp_Trsf()
+                m = tf.get("matrix") if isinstance(tf, dict) else None
+                if isinstance(m, list) and len(m) == 16:
+                    mm = normalize_matrix16(m)
+                    tr.SetValues(
+                        float(mm[0]), float(mm[1]), float(mm[2]), float(mm[3]),
+                        float(mm[4]), float(mm[5]), float(mm[6]), float(mm[7]),
+                        float(mm[8]), float(mm[9]), float(mm[10]), float(mm[11])
+                    )
+                else:
+                    pos = tf.get("pos", [0, 0, 0]) if isinstance(tf, dict) else [0, 0, 0]
+                    quat = tf.get("quat", [1, 0, 0, 0]) if isinstance(tf, dict) else [1, 0, 0, 0]
+                    if isinstance(quat, list) and len(quat) == 4 and quat != [1, 0, 0, 0]:
+                        q = gp_Quaternion(float(quat[1]), float(quat[2]), float(quat[3]), float(quat[0]))
+                        tr.SetRotation(q)
+                    if isinstance(pos, list) and len(pos) == 3:
+                        tr.SetTranslation(gp_Vec(float(pos[0]), float(pos[1]), float(pos[2])))
+                return BRepBuilderAPI_Transform(shape, tr, True).Shape()
+
+            self.canvas._display.EraseAll()
+
+            c_gray = Quantity_Color(0.6, 0.6, 0.6, Quantity_TOC_RGB)
+            c_blue = Quantity_Color(0.1, 0.45, 0.95, Quantity_TOC_RGB)
+
+            for n in original_nodes:
+                shp = n.get("shape")
+                tf = n.get("transform", {})
+                if shp is None:
+                    continue
+                shp_w = apply_transform(shp, tf)
+                self.canvas._display.DisplayShape(
+                    shp_w,
+                    color=c_gray,
+                    transparency=0.75 if deformed_nodes else 0.0,
+                    update=False
+                )
+
+            for n in deformed_nodes:
+                shp = n.get("shape")
+                tf = n.get("transform", {})
+                if shp is None:
+                    continue
+                shp_w = apply_transform(shp, tf)
+                self.canvas._display.DisplayShape(
+                    shp_w,
+                    color=c_blue,
+                    transparency=0.0,
+                    update=False
+                )
+
+            self.canvas._display.FitAll()
+            self.canvas._display.Repaint()
+            self.set_status(f"联动变形渲染完成：原始{len(original_nodes)}，变形{len(deformed_nodes)}")
+        except Exception as e:
+            self.show_error("渲染失败", f"联动变形结果显示失败：{e}")
