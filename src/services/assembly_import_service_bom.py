@@ -4,7 +4,7 @@
 """
 import os
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime
 
 from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Compound
@@ -17,6 +17,9 @@ from .. services.solidworks_bom_extractor_auto import SolidWorksBOMExtractorAuto
 from ..db.persistence_service import PersistenceService
 from ..db.mysql import get_conn
 from ..db.util import uuid_to_bin, bin_to_uuid, new_uuid
+from ..services.assembly_viewer_service import AssemblyViewerService
+from ..services.obj_export_service import ObjExportService
+from ..services.glb_export_service import GlbExportService
 
 
 class AssemblyImportServiceBOM:
@@ -24,18 +27,29 @@ class AssemblyImportServiceBOM:
 
     def __init__(self):
         self.persistence = PersistenceService()
+        self.viewer_service = AssemblyViewerService()
+        self.obj_exporter = ObjExportService()
+        self.glb_exporter = GlbExportService()
 
     def import_assembly_from_bom(
             self,
             sldasm_path: str,
             assembly_name: Optional[str] = None,
-            assembly_description: Optional[str] = None
+            assembly_description: Optional[str] = None,
+            progress_callback: Optional[Callable[[int], None]] = None
     ) -> Dict[str, Any]:
         """从装配文件导入并基于BOM入库（使用SolidWorks宏批量导出STEP）"""
+        def _report_progress(p: int):
+            if progress_callback:
+                try:
+                    progress_callback(max(0, min(100, int(p))))
+                except Exception:
+                    pass
 
         print("\n" + "=" * 70)
         print("📦 基于BOM的装配导入（使用SolidWorks宏批量导出）")
         print("=" * 70 + "\n")
+        _report_progress(15)
 
         if not os.path.exists(sldasm_path):
             raise FileNotFoundError(f"文件不存在:  {sldasm_path}")
@@ -50,16 +64,19 @@ class AssemblyImportServiceBOM:
             print("🚀 启动SolidWorks...")
             if not bom_extractor.start_solidworks(visible=False):
                 raise RuntimeError("无法启动SolidWorks")
+            _report_progress(22)
 
             print(f"📂 打开装配:  {assembly_name}")
             if not bom_extractor.open_assembly(sldasm_path):
                 raise RuntimeError("无法打开装配文件")
+            _report_progress(30)
 
             # ========== 2. 提取BOM ==========
             print("\n📋 提取BOM...")
             bom_items = bom_extractor.extract_bom()
             instance_rows = bom_extractor.extract_instances(top_level_only=False)
             print(f"✓ 实例位姿数: {len(instance_rows)}")
+            _report_progress(40)
 
             if not bom_items:
                 raise RuntimeError("BOM为空，无法导入")
@@ -72,6 +89,7 @@ class AssemblyImportServiceBOM:
             os.makedirs(export_dir, exist_ok=True)
 
             print(f"\n📤 使用SolidWorks宏批量导出零件到:  {export_dir}")
+            _report_progress(45)
 
             # 构建宏文件路径
             current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -120,6 +138,9 @@ class AssemblyImportServiceBOM:
                                     current_files[part_key] = step_file
 
                         current_count = len(current_files)
+                        if expected_count > 0:
+                            ratio = float(current_count) / float(expected_count)
+                            _report_progress(45 + int(ratio * 15))
 
                         # 检查是否所有文件都已生成
                         if current_count == expected_count:
@@ -189,6 +210,7 @@ class AssemblyImportServiceBOM:
 
             # ========== 4. 创建装配记录 ==========
             print(f"\n💾 创建装配记录...")
+            _report_progress(65)
             assembly_id = self._create_assembly_record(
                 assembly_name,
                 assembly_description,
@@ -201,6 +223,7 @@ class AssemblyImportServiceBOM:
             print(f"\n📦 导入零件版本...")
             part_versions = self._import_part_versions(bom_items, exported_files)
             print(f"✓ 共处理 {len(part_versions)} 种零件版本")
+            _report_progress(78)
 
             # ========== 6. 创建装配节点 ==========
             print(f"\n🔗 创建装配节点...")
@@ -212,6 +235,27 @@ class AssemblyImportServiceBOM:
                 instance_rows=instance_rows
             )
             print(f"✓ 创建 {node_count} 个装配节点")
+            _report_progress(88)
+
+            obj_path = ""
+            glb_path = ""
+            try:
+                nodes_for_obj = self.viewer_service.get_assembly_nodes(assembly_id)
+                obj_path = self.obj_exporter.export_assembly_nodes(
+                    assembly_name=assembly_name,
+                    assembly_id=assembly_id,
+                    nodes=nodes_for_obj,
+                ) or ""
+                if obj_path:
+                    print(f"✅ 装配 OBJ 已导出: {obj_path}")
+                    glb_path, glb_err = self.glb_exporter.obj_to_glb(obj_path)
+                    if glb_path:
+                        print(f"✅ 装配 GLB 已导出: {glb_path}")
+                    else:
+                        print(f"⚠️ 装配 GLB 导出失败（已忽略）: {glb_err}")
+            except Exception as ex:
+                print(f"⚠️ 装配 OBJ/GLB 导出失败（已忽略）: {ex}")
+            _report_progress(95)
 
             # ========== 7. 返回结果 ==========
             result = {
@@ -221,7 +265,9 @@ class AssemblyImportServiceBOM:
                 'part_count': len(bom_items),
                 'node_count': node_count,
                 'total_instances': total_qty,
-                'exported_step_count': len(exported_files)
+                'exported_step_count': len(exported_files),
+                'obj_path': obj_path,
+                'glb_path': glb_path,
             }
 
             print(f"\n{'=' * 70}")
@@ -231,6 +277,7 @@ class AssemblyImportServiceBOM:
             print(f"   总实例数: {total_qty}")
             print(f"   导出STEP:  {len(exported_files)} 个")
             print(f"{'=' * 70}\n")
+            _report_progress(100)
 
             return result
 
@@ -372,6 +419,7 @@ class AssemblyImportServiceBOM:
             step_file_path: Optional[str] = None  # ✅ 新增参数：STEP文件路径
     ) -> Dict[str, Any]:
         """创建零件版本"""
+        part_name = self._to_cn_part_name(part_name)
 
         params_snapshot = {
             'source': 'bom',
@@ -454,6 +502,40 @@ class AssemblyImportServiceBOM:
             'version_id': version_id,
             'version_no': version_no
         }
+
+    @staticmethod
+    def _to_cn_part_name(raw_name: str) -> str:
+        name = (raw_name or "").strip()
+        if not name:
+            return "未命名零部件"
+        if any("\u4e00" <= ch <= "\u9fff" for ch in name):
+            return name
+        lower = name.lower()
+        mapping = [
+            (["barrel"], "枪管"),
+            (["receiver"], "机匣"),
+            (["bolt"], "枪机"),
+            (["stock"], "枪托"),
+            (["trigger"], "扳机"),
+            (["sight"], "瞄具"),
+            (["magazine"], "弹匣"),
+            (["grip"], "握把"),
+            (["rail"], "导轨"),
+            (["spring"], "弹簧"),
+            (["pin"], "销钉"),
+            (["screw"], "螺钉"),
+            (["nut"], "螺母"),
+            (["washer"], "垫片"),
+            (["gear"], "齿轮"),
+            (["shaft"], "轴"),
+            (["bearing"], "轴承"),
+            (["connector"], "连接件"),
+            (["housing", "cover"], "壳体"),
+        ]
+        for keys, cn in mapping:
+            if any(k in lower for k in keys):
+                return cn
+        return f"零部件_{name}"
 
     def _update_part_mass(self, version_id: str, mass: float):
         """更新零件版本的质量"""

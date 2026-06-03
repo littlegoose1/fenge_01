@@ -289,6 +289,41 @@ class ApplicationController(QObject):
             builder.Add(compound, shape)
         return compound
 
+    @staticmethod
+    def _to_cn_part_name(raw_name: str) -> str:
+        name = (raw_name or "").strip()
+        if not name:
+            return "未命名零部件"
+        if any("\u4e00" <= ch <= "\u9fff" for ch in name):
+            return name
+
+        lower = name.lower()
+        mapping = [
+            (["barrel"], "枪管"),
+            (["receiver"], "机匣"),
+            (["bolt"], "枪机"),
+            (["stock"], "枪托"),
+            (["trigger"], "扳机"),
+            (["sight"], "瞄具"),
+            (["magazine"], "弹匣"),
+            (["grip"], "握把"),
+            (["rail"], "导轨"),
+            (["spring"], "弹簧"),
+            (["pin"], "销钉"),
+            (["screw"], "螺钉"),
+            (["nut"], "螺母"),
+            (["washer"], "垫片"),
+            (["gear"], "齿轮"),
+            (["shaft"], "轴"),
+            (["bearing"], "轴承"),
+            (["connector"], "连接件"),
+            (["housing", "cover"], "壳体"),
+        ]
+        for keys, cn in mapping:
+            if any(k in lower for k in keys):
+                return cn
+        return f"零部件_{name}"
+
     @Slot()
     def export_part_to_db(self):
         if not self.primitives:
@@ -299,7 +334,7 @@ class ApplicationController(QObject):
             part_shape = self._compose_part_shape()
             base = os.path.splitext(os.path.basename(self.current_file_path or "unnamed"))[0]
             part_key = base
-            part_name = base
+            part_name = self._to_cn_part_name(base)
 
             params_snapshot:  Dict[str, Any] = {
                 "primitives": [
@@ -328,10 +363,11 @@ class ApplicationController(QObject):
                 meta_version={"ui": "pyside6"},
             )
 
-            self.main_window.show_info(
-                "导出成功",
-                f"已保存零部件版本 v{result['version_no']}\n路径: {result['step_path']}"
-            )
+            msg = f"已保存零部件版本 v{result['version_no']}\nSTEP: {result['step_path']}"
+            if result.get("obj_path"):
+                msg += f"\nOBJ: {result['obj_path']}"
+            msg += f"\n零部件名称: {part_name}"
+            self.main_window.show_info("导出成功", msg)
             self.main_window.set_status(f"已入库零部件 v{result['version_no']}")
         except Exception as e:
             self.main_window.show_error("导出失败", f"保存零部件到数据库失败：{e}")
@@ -341,6 +377,8 @@ class ApplicationController(QObject):
     def import_and_store_assembly(self, step_path: str):
         """导入装配并入库（智能选择导入方式）"""
         try:
+            self.main_window.begin_import_progress()
+            self.main_window.set_progress(5)
             file_ext = os.path.splitext(step_path)[1].lower()
 
             # 检查文件类型
@@ -352,29 +390,45 @@ class ApplicationController(QObject):
                 return
 
             self.main_window.set_status(f"开始导入:  {os.path.basename(step_path)}")
+            self.main_window.set_progress(12)
 
             # ✅ 根据文件类型选择导入方式
             if file_ext == '.sldasm':
                 # SolidWorks装配 - 使用BOM导入
-                result = self._import_solidworks_assembly_bom(step_path)
+                result = self._import_solidworks_assembly_bom(
+                    step_path,
+                    progress_callback=self.main_window.set_progress
+                )
             else:
                 # STEP文件 - 使用原有的几何分析方法
+                self.main_window.set_status("正在解析STEP装配并入库...")
+                self.main_window.set_progress(45)
                 result = self.assembly_importer.import_step_assembly(step_path)
+                self.main_window.set_progress(85)
 
             asm_id = result["assembly_id"]
-            node_count = len(result.get("nodes", []))
+            node_count = int(result.get("node_count", len(result.get("nodes", []))))
             mode = result.get("mode", result.get("import_mode", "unknown"))
+            obj_path = result.get("obj_path", "")
+            glb_path = result.get("glb_path", "")
+            self.main_window.set_progress(95)
 
-            self.main_window.show_info(
-                "导入完成",
+            msg = (
                 f"✅ 导入成功！\n\n"
                 f"模式: {mode}\n"
                 f"装配ID: {asm_id[:8]}...\n"
                 f"零件种类: {result.get('total_parts', 'N/A')}\n"
                 f"装配节点: {node_count}"
             )
+            if obj_path:
+                msg += f"\nOBJ: {obj_path}"
+            if glb_path:
+                msg += f"\nGLB: {glb_path}"
+
+            self.main_window.show_info("导入完成", msg)
 
             self.main_window.set_status(f"导入完成（{mode}，节点: {node_count}）")
+            self.main_window.set_progress(100)
 
             # ✅ 导入成功后自动刷新装配列表
             QTimer.singleShot(100, self.refresh_assemblies)
@@ -384,8 +438,14 @@ class ApplicationController(QObject):
             self.main_window.set_status("导入失败")
             import traceback
             traceback.print_exc()
+        finally:
+            QTimer.singleShot(500, self.main_window.end_import_progress)
 
-    def _import_solidworks_assembly_bom(self, step_path: str) -> Dict[str, Any]:
+    def _import_solidworks_assembly_bom(
+        self,
+        step_path: str,
+        progress_callback=None
+    ) -> Dict[str, Any]:
         """导入SolidWorks装配（基于BOM）"""
         # 获取装配名称
         assembly_name = os.path.splitext(os. path.basename(step_path))[0]
@@ -405,7 +465,8 @@ class ApplicationController(QObject):
         result = self.assembly_importer_bom.import_assembly_from_bom(
             step_path,
             assembly_name=assembly_name,
-            assembly_description=description
+            assembly_description=description,
+            progress_callback=progress_callback
         )
 
 
@@ -631,7 +692,7 @@ class ApplicationController(QObject):
 • 干涉穿透:  {validation['penetrations']}
 • 紧密接触: {validation['contacts']}
 • 间隙区域: {validation['clearances']}
-• 最大严重度: {validation['max_severity']:. 2f}
+• 最大严重度: {validation['max_severity']:.2f}
 
 """
 

@@ -6,3 +6,4 @@ mysql-connector-python==9.3.0
 neo4j==5.25.0
 python-dotenv==1.0.1
 scipy>=1.7.0  # 用于优化算法
+trimesh>=4.4.0  # 用于OBJ转GLB

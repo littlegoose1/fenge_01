@@ -10,9 +10,11 @@ from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QLabel,
                                QDoubleSpinBox, QPushButton, QToolBar,
                                QCheckBox, QDialog, QTextEdit, QDialogButtonBox,
                                QComboBox, QLineEdit, QRadioButton, QTabWidget,
-                               QStyle, QDockWidget, QTableWidget, QTableWidgetItem, QHeaderView)
-from PySide6.QtCore import Qt, Signal, Slot, QSize
+                               QStyle, QDockWidget, QTableWidget, QTableWidgetItem, QHeaderView,
+                               QFrame)
+from PySide6.QtCore import Qt, Signal, Slot, QSize, QEventLoop
 from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QApplication
 
 from OCC.Core.TopoDS import TopoDS_Shape
 from OCC.Display.backend import load_backend
@@ -26,6 +28,7 @@ from ..ui.solve_dialog import SolveAssemblyDialog
 from src.view.unity_launcher import UnityLauncherWidget
 from . equipment_panel import EquipmentPanel
 from src.ui.deformation_panel import DeformationPanel
+from src.ui.assembly_builder_panel import AssemblyBuilderPanel
 
 
 # ✅ 优化：验证结果对话框
@@ -237,7 +240,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("单兵装备数字化设计系统")
+        self.setWindowTitle("装备快速建模演示工具")
         self.resize(1400, 900)
 
         self.preview_enabled = True
@@ -247,10 +250,12 @@ class MainWindow(QMainWindow):
         self.progressBar.setMaximumWidth(200)
         self.progressBar.setVisible(False)
         self.statusBar.addPermanentWidget(self.progressBar)
+        self._center_progress_enabled = False
 
         self._create_menus()
         self._create_toolbars()
         self._create_layout()
+        self._init_import_progress_overlay()
 
         self.current_primitive_index = -1
         self.current_assembly_id = ""
@@ -258,6 +263,61 @@ class MainWindow(QMainWindow):
         self.setup_unity_launcher()
 
         self.setup_deformation_panel()
+        self.setWindowState(self.windowState() | Qt.WindowMaximized)
+
+    def _init_import_progress_overlay(self):
+        self.import_progress_overlay = QFrame(self)
+        self.import_progress_overlay.setObjectName("importProgressOverlay")
+        self.import_progress_overlay.setFrameShape(QFrame.StyledPanel)
+        self.import_progress_overlay.setStyleSheet("""
+            #importProgressOverlay {
+                background: rgba(255, 255, 255, 235);
+                border: 1px solid #8aa4bf;
+                border-radius: 10px;
+            }
+            #importProgressOverlay QLabel {
+                font-size: 14px;
+                font-weight: 600;
+                color: #1f3a56;
+            }
+        """)
+        overlay_layout = QVBoxLayout(self.import_progress_overlay)
+        overlay_layout.setContentsMargins(16, 14, 16, 14)
+        overlay_layout.setSpacing(10)
+
+        self.import_progress_title = QLabel("正在导入装配并入库...")
+        overlay_layout.addWidget(self.import_progress_title)
+        self.import_progress_bar = QProgressBar()
+        self.import_progress_bar.setRange(0, 100)
+        self.import_progress_bar.setValue(0)
+        self.import_progress_bar.setTextVisible(True)
+        overlay_layout.addWidget(self.import_progress_bar)
+
+        self.import_progress_overlay.resize(380, 110)
+        self.import_progress_overlay.hide()
+        self._reposition_import_progress_overlay()
+
+    def _reposition_import_progress_overlay(self):
+        if not hasattr(self, "import_progress_overlay"):
+            return
+        w = self.import_progress_overlay.width()
+        h = self.import_progress_overlay.height()
+        x = max(0, (self.width() - w) // 2)
+        y = max(0, (self.height() - h) // 2)
+        self.import_progress_overlay.move(x, y)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._reposition_import_progress_overlay()
+
+    def begin_import_progress(self):
+        self._center_progress_enabled = True
+        if hasattr(self, "import_progress_title"):
+            self.import_progress_title.setText("正在导入装配并入库...")
+
+    def end_import_progress(self):
+        self._center_progress_enabled = False
+        self.set_progress(-1)
 
     def _create_menus(self):
         """✅ 菜单结构（含SolidWorks BOM）"""
@@ -589,22 +649,39 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         main_layout = QHBoxLayout(central)
         splitter = QSplitter(Qt.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(8)
         main_layout.addWidget(splitter)
 
         # 左侧面板：几何体列表 + 参数编辑
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
+        left_splitter = QSplitter(Qt.Vertical)
+        left_splitter.setChildrenCollapsible(False)
+        left_splitter.setHandleWidth(8)
+
+        geom_wrap = QWidget()
+        geom_layout = QVBoxLayout(geom_wrap)
+        geom_layout.setContentsMargins(0, 0, 0, 0)
         self.geometry_tree = GeometryTreeWidget()
         self.geometry_tree.primitiveSelected.connect(self._on_primitive_selected)
-        left_layout.addWidget(QLabel("几何体列表"))
-        left_layout.addWidget(self.geometry_tree)
+        geom_layout.addWidget(QLabel("几何体列表"))
+        geom_layout.addWidget(self.geometry_tree)
 
+        param_wrap = QWidget()
+        param_layout = QVBoxLayout(param_wrap)
+        param_layout.setContentsMargins(0, 0, 0, 0)
         self.param_panel = ParameterControlPanel()
         self.param_panel.parameterChanged.connect(self._on_parameter_changed)
         self.param_panel.previewToggled.connect(self._on_preview_toggled)
-        left_layout.addWidget(QLabel("参数编辑"))
-        left_layout.addWidget(self.param_panel)
+        param_layout.addWidget(QLabel("参数编辑"))
+        param_layout.addWidget(self.param_panel)
+
+        left_splitter.addWidget(geom_wrap)
+        left_splitter.addWidget(param_wrap)
+        left_splitter.setSizes([420, 320])
+        left_layout.addWidget(left_splitter)
         splitter.addWidget(left_panel)
 
         # 中间面板：3D视图
@@ -616,10 +693,13 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.view_panel)
 
         # 两列布局
-        splitter.setSizes([300, 1100])
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 4)
+        splitter.setSizes([360, 1040])
 
         self.canvas.InitDriver()
         self._init_view()
+        self._init_builder_drag()
 
     def _init_view(self):
         from PySide6.QtWidgets import QApplication
@@ -632,6 +712,83 @@ class MainWindow(QMainWindow):
         self.canvas._display. View_Top()
         self.canvas._display. View_Iso()
         self.canvas._display.FitAll()
+
+    def _init_builder_drag(self):
+        self._builder_drag_active = False
+        self._builder_last_mouse_pos = None
+        self._builder_drag_scale = float(os.getenv("ASSEMBLY_BUILDER_DRAG_SCALE", "1.0"))  # mm/px
+
+        self._orig_canvas_mouse_press = self.canvas.mousePressEvent
+        self._orig_canvas_mouse_move = self.canvas.mouseMoveEvent
+        self._orig_canvas_mouse_release = self.canvas.mouseReleaseEvent
+
+        self.canvas.mousePressEvent = self._canvas_mouse_press_event
+        self.canvas.mouseMoveEvent = self._canvas_mouse_move_event
+        self.canvas.mouseReleaseEvent = self._canvas_mouse_release_event
+
+    def _is_builder_tab_active(self) -> bool:
+        return (
+            hasattr(self, "management_tabs")
+            and hasattr(self, "assembly_builder_panel")
+            and self.management_tabs.currentWidget() is self.assembly_builder_panel
+        )
+
+    def _canvas_mouse_press_event(self, event):
+        try:
+            if (
+                event.button() == Qt.LeftButton
+                and (event.modifiers() & Qt.ControlModifier)
+                and self._is_builder_tab_active()
+                and hasattr(self, "assembly_builder_panel")
+                and self.assembly_builder_panel.has_selected_working_node()
+            ):
+                self._builder_drag_active = True
+                self._builder_last_mouse_pos = event.position()
+                self.assembly_builder_panel.begin_drag_move()
+                self.set_status("拖拽中：Ctrl+左键移动XY，Ctrl+Shift+左键移动Z")
+                return
+        except Exception:
+            pass
+
+        return self._orig_canvas_mouse_press(event)
+
+    def _canvas_mouse_move_event(self, event):
+        try:
+            if self._builder_drag_active and self._builder_last_mouse_pos is not None:
+                cur = event.position()
+                dx_px = float(cur.x() - self._builder_last_mouse_pos.x())
+                dy_px = float(cur.y() - self._builder_last_mouse_pos.y())
+                self._builder_last_mouse_pos = cur
+
+                scale = self._builder_drag_scale
+                if not (event.modifiers() & Qt.ControlModifier):
+                    self._builder_drag_active = False
+                    self._builder_last_mouse_pos = None
+                    self.assembly_builder_panel.end_drag_move()
+                    return self._orig_canvas_mouse_move(event)
+                if event.modifiers() & Qt.ShiftModifier:
+                    self.assembly_builder_panel.move_selected_node_by(0.0, 0.0, -dy_px * scale)
+                else:
+                    self.assembly_builder_panel.move_selected_node_by(dx_px * scale, -dy_px * scale, 0.0)
+                return
+        except Exception:
+            pass
+
+        return self._orig_canvas_mouse_move(event)
+
+    def _canvas_mouse_release_event(self, event):
+        try:
+            if event.button() == Qt.LeftButton and self._builder_drag_active:
+                self._builder_drag_active = False
+                self._builder_last_mouse_pos = None
+                if hasattr(self, "assembly_builder_panel"):
+                    self.assembly_builder_panel.end_drag_move()
+                self.set_status("拖拽完成")
+                return
+        except Exception:
+            pass
+
+        return self._orig_canvas_mouse_release(event)
 
     def _on_preview_toggled(self, enabled:  bool):
         self.preview_enabled = enabled
@@ -646,9 +803,30 @@ class MainWindow(QMainWindow):
     def set_progress(self, percent: int):
         if percent < 0:
             self.progressBar.setVisible(False)
+            if hasattr(self, "import_progress_overlay"):
+                self.import_progress_overlay.hide()
         else:
+            val = max(0, min(100, int(percent)))
             self.progressBar.setVisible(True)
-            self.progressBar.setValue(percent)
+            self.progressBar.setValue(val)
+            label = "导入进度" if self._center_progress_enabled else "处理进度"
+            self.progressBar.setFormat(f"{label} {val}%")
+            if self._center_progress_enabled and hasattr(self, "import_progress_overlay"):
+                self.import_progress_overlay.show()
+                self.import_progress_overlay.raise_()
+                self.import_progress_bar.setValue(val)
+                self.import_progress_bar.setFormat(f"{val}%")
+                self._reposition_import_progress_overlay()
+            elif hasattr(self, "import_progress_overlay"):
+                self.import_progress_overlay.hide()
+            self.statusBar.repaint()
+            self.progressBar.repaint()
+            if self._center_progress_enabled and hasattr(self, "import_progress_overlay"):
+                self.import_progress_overlay.repaint()
+            if val >= 100 and not self._center_progress_enabled:
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(500, lambda: self.set_progress(-1))
+            QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
 
     def show_error(self, title: str, message: str):
         QMessageBox.critical(self, title, message)
@@ -974,13 +1152,6 @@ class MainWindow(QMainWindow):
     def setup_unity_launcher(self):
         """设置Unity启动器"""
         self.unity_launcher = UnityLauncherWidget()
-
-        unity_dock = QDockWidget("人体展示", self)
-        unity_dock.setWidget(self.unity_launcher)
-        unity_dock.setAllowedAreas(Qt.RightDockWidgetArea)
-        unity_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
-
-        self.addDockWidget(Qt.RightDockWidgetArea, unity_dock)
         self.setup_equipment_panel()
 
     def setup_equipment_panel(self):
@@ -990,14 +1161,23 @@ class MainWindow(QMainWindow):
 
         self.equipment_panel = EquipmentPanel()
         self.deformation_panel = DeformationPanel(on_render=self.render_deformation_result)
+        self.assembly_builder_panel = AssemblyBuilderPanel(
+            on_render=self.render_builder_scene,
+            on_saved=lambda: self.refresh_assemblies_requested.emit()
+        )
 
         self.management_tabs = QTabWidget()
         self.management_tabs.setTabPosition(QTabWidget.South)
+        self.management_tabs.setMinimumHeight(320)
         self.management_tabs.addTab(self.equipment_panel, "装备管理")
+        self.management_tabs.addTab(self.assembly_builder_panel, "自由拼装")
         self.management_tabs.addTab(self.deformation_panel, "联动变形")
+        if hasattr(self, "unity_launcher"):
+            self.management_tabs.addTab(self.unity_launcher, "人体展示")
 
         self.management_dock = QDockWidget("装配工作台", self)
         self.management_dock.setWidget(self.management_tabs)
+        self.management_dock.setMinimumHeight(360)
         self.management_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
 
         features = QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable
@@ -1152,3 +1332,106 @@ class MainWindow(QMainWindow):
             self.set_status(f"联动变形渲染完成：原始{len(original_nodes)}，变形{len(deformed_nodes)}")
         except Exception as e:
             self.show_error("渲染失败", f"联动变形结果显示失败：{e}")
+
+    def render_builder_scene(self, assembly_nodes, preview_node=None, fit_view=True, clear_scene=True):
+        if self.canvas._display is None:
+            return
+
+        try:
+            from OCC.Core.gp import gp_Trsf, gp_Vec, gp_Quaternion
+            from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform
+
+            def normalize_matrix16(matrix):
+                m = [float(v) for v in matrix[:16]]
+                if abs(m[15] - 1.0) < 1e-9:
+                    return m
+                t_scale = float(os.getenv("SW_TRANSFORM_TRANSLATION_SCALE", "1000"))
+                return [
+                    m[0], m[1], m[2], m[9] * t_scale,
+                    m[3], m[4], m[5], m[10] * t_scale,
+                    m[6], m[7], m[8], m[11] * t_scale,
+                    0.0, 0.0, 0.0, 1.0
+                ]
+
+            def apply_transform(shape, tf):
+                tr = gp_Trsf()
+                m = tf.get("matrix") if isinstance(tf, dict) else None
+                if isinstance(m, list) and len(m) == 16:
+                    mm = normalize_matrix16(m)
+                    tr.SetValues(
+                        float(mm[0]), float(mm[1]), float(mm[2]), float(mm[3]),
+                        float(mm[4]), float(mm[5]), float(mm[6]), float(mm[7]),
+                        float(mm[8]), float(mm[9]), float(mm[10]), float(mm[11])
+                    )
+                else:
+                    pos = tf.get("pos", [0, 0, 0]) if isinstance(tf, dict) else [0, 0, 0]
+                    quat = tf.get("quat", [1, 0, 0, 0]) if isinstance(tf, dict) else [1, 0, 0, 0]
+                    if isinstance(quat, list) and len(quat) == 4 and quat != [1, 0, 0, 0]:
+                        q = gp_Quaternion(float(quat[1]), float(quat[2]), float(quat[3]), float(quat[0]))
+                        tr.SetRotation(q)
+                    if isinstance(pos, list) and len(pos) == 3:
+                        tr.SetTranslation(gp_Vec(float(pos[0]), float(pos[1]), float(pos[2])))
+                return BRepBuilderAPI_Transform(shape, tr, True).Shape()
+
+            if not hasattr(self, "_builder_ais_handles"):
+                self._builder_ais_handles = []
+            if clear_scene:
+                # 空装配/重载场景时执行真正清屏，避免残留旧模型
+                try:
+                    self.canvas._display.EraseAll()
+                except Exception:
+                    pass
+                self._builder_ais_handles = []
+            else:
+                # 拖拽过程保持增量更新，减少闪烁
+                for ais in self._builder_ais_handles:
+                    try:
+                        self.canvas._display.Context.Remove(ais, False)
+                    except Exception:
+                        pass
+                self._builder_ais_handles = []
+
+            c_blue = Quantity_Color(0.15, 0.45, 0.95, Quantity_TOC_RGB)
+            c_selected = Quantity_Color(0.95, 0.2, 0.2, Quantity_TOC_RGB)
+            c_orange = Quantity_Color(0.95, 0.55, 0.15, Quantity_TOC_RGB)
+
+            for n in assembly_nodes or []:
+                shp = n.get("shape")
+                tf = n.get("transform", {})
+                is_selected = bool(n.get("selected", False))
+                if shp is None:
+                    continue
+                shp_w = apply_transform(shp, tf)
+                ais = self.canvas._display.DisplayShape(
+                    shp_w,
+                    color=c_selected if is_selected else c_blue,
+                    transparency=0.0,
+                    update=False
+                )
+                if isinstance(ais, (list, tuple)):
+                    self._builder_ais_handles.extend([x for x in ais if x is not None])
+                elif ais is not None:
+                    self._builder_ais_handles.append(ais)
+
+            if preview_node:
+                shp = preview_node.get("shape")
+                tf = preview_node.get("transform", {})
+                if shp is not None:
+                    shp_w = apply_transform(shp, tf)
+                    ais = self.canvas._display.DisplayShape(
+                        shp_w,
+                        color=c_orange,
+                        transparency=0.45,
+                        update=False
+                    )
+                    if isinstance(ais, (list, tuple)):
+                        self._builder_ais_handles.extend([x for x in ais if x is not None])
+                    elif ais is not None:
+                        self._builder_ais_handles.append(ais)
+
+            if fit_view:
+                self.canvas._display.FitAll()
+            self.canvas._display.Repaint()
+            self.set_status(f"自由拼装渲染完成：{len(assembly_nodes or [])} 个零件")
+        except Exception as e:
+            self.show_error("渲染失败", f"自由拼装场景显示失败：{e}")
